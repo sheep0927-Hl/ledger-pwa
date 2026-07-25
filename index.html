@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>总账 Ledger</title>
+
+  <!-- PWA / iOS 添加到主屏幕 -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#c62828" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="总账" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="icon" href="icons/icon-192.png" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ============ 登录页 ============ -->
+  <section id="login-view" class="login-view">
+    <div class="login-card">
+      <div class="login-logo">¥</div>
+      <h1>总账 Ledger</h1>
+      <p class="login-sub">登录你的账号以同步记录</p>
+      <form id="login-form" autocomplete="on">
+        <input id="email" type="email" inputmode="email" placeholder="邮箱" autocomplete="username" required />
+        <input id="password" type="password" placeholder="密码" autocomplete="current-password" required />
+        <button id="login-btn" type="submit" class="btn-primary">登录</button>
+      </form>
+      <div id="login-msg" class="msg"></div>
+    </div>
+  </section>
+
+  <!-- ============ 主应用 ============ -->
+  <div id="app" class="app hidden">
+
+    <!-- 顶部栏 -->
+    <header class="topbar">
+      <span id="sync-status" class="sync-status">…</span>
+      <div class="topbar-title" id="topbar-title">今日</div>
+      <button id="logout-btn" class="topbar-logout" title="退出登录">退出</button>
+    </header>
+
+    <!-- 全局提示 banner（如缺少 material_qty 列） -->
+    <div id="global-banner" class="banner hidden"></div>
+
+    <main class="content">
+
+      <!-- ---------- 今日 ---------- -->
+      <section id="today-view" class="view active">
+        <div class="card">
+          <div class="card-row">
+            <label>日期</label>
+            <input id="t-date" type="date" />
+          </div>
+          <div class="grid2">
+            <div class="field"><label>小红书出单 (xhs)</label><input id="t-xhs" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
+            <div class="field"><label>抖音出单 (dy)</label><input id="t-dy" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
+            <div class="field"><label>退款 (refund)</label><input id="t-refund" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
+            <div class="field" id="row-t-assist"><label>助播 (assist ¥)</label><input id="t-assist" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
+            <div class="field"><label>图文 (noteQty)</label><input id="t-note" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
+            <div class="field"><label>素材 (materialQty)</label><input id="t-material" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
+            <div class="field"><label>视频 (videoQty)</label><input id="t-video" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
+          </div>
+          <button id="t-save" class="btn-primary">保存记录</button>
+          <div id="t-status" class="hint"></div>
+        </div>
+
+        <div class="card summary-card">
+          <div class="summary-title">当日金额</div>
+          <div class="summary-line"><span>出单净额</span><b id="s-net">0</b></div>
+          <div class="summary-line"><span>出单金额</span><b id="s-out">¥0</b></div>
+          <div class="summary-line"><span>发布额(图文+素材+视频)</span><b id="s-pub">¥0</b></div>
+          <div class="summary-line"><span>助播</span><b id="s-assist">¥0</b></div>
+        </div>
+      </section>
+
+      <!-- ---------- 历史 ---------- -->
+      <section id="history-view" class="view">
+        <div id="history-list" class="history-list"></div>
+        <div id="history-empty" class="empty hidden">暂无记录</div>
+      </section>
+
+      <!-- ---------- 工资 ---------- -->
+      <section id="salary-view" class="view">
+        <div class="card">
+          <div class="grid2">
+            <div class="field"><label>开始日期</label><input id="sal-start" type="date" /></div>
+            <div class="field"><label>结束日期</label><input id="sal-end" type="date" /></div>
+          </div>
+          <div class="quick-range">
+            <button data-range="thisMonth" class="chip">本月</button>
+            <button data-range="lastMonth" class="chip">上月</button>
+            <button data-range="cycle" class="chip">16→15 周期</button>
+          </div>
+          <button id="sal-calc" class="btn-primary">计算工资</button>
+        </div>
+        <div id="salary-result" class="card salary-card hidden"></div>
+        <div id="salary-empty" class="empty">选择日期后计算工资</div>
+      </section>
+
+    </main>
+
+    <!-- 底部导航 -->
+    <nav class="tabbar">
+      <button class="tab active" data-tab="today">
+        <span class="tab-ico">📝</span><span>今日</span>
+      </button>
+      <button class="tab" data-tab="history">
+        <span class="tab-ico">📚</span><span>历史</span>
+      </button>
+      <button class="tab" data-tab="salary">
+        <span class="tab-ico">💰</span><span>工资</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- 编辑弹层（历史记录编辑复用） -->
+  <div id="edit-sheet" class="sheet hidden">
+    <div class="sheet-backdrop"></div>
+    <div class="sheet-panel">
+      <div class="sheet-title">编辑记录</div>
+      <div class="card-row">
+        <label>日期</label>
+        <input id="e-date" type="date" disabled />
+      </div>
+      <div class="grid2">
+        <div class="field"><label>小红书出单</label><input id="e-xhs" type="number" inputmode="numeric" min="0" /></div>
+        <div class="field"><label>抖音出单</label><input id="e-dy" type="number" inputmode="numeric" min="0" /></div>
+        <div class="field"><label>退款</label><input id="e-refund" type="number" inputmode="numeric" min="0" /></div>
+        <div class="field" id="row-e-assist"><label>助播 ¥</label><input id="e-assist" type="number" inputmode="numeric" min="0" /></div>
+        <div class="field"><label>图文</label><input id="e-note" type="number" inputmode="numeric" min="0" /></div>
+        <div class="field"><label>素材</label><input id="e-material" type="number" inputmode="numeric" min="0" /></div>
+        <div class="field"><label>视频</label><input id="e-video" type="number" inputmode="numeric" min="0" /></div>
+      </div>
+      <div class="sheet-actions">
+        <button id="e-delete" class="btn-danger">删除</button>
+        <button id="e-cancel" class="btn-ghost">取消</button>
+        <button id="e-save" class="btn-primary">保存</button>
+      </div>
+      <div id="e-status" class="hint"></div>
+    </div>
+  </div>
+
+  <!-- 显式恢复确认弹层（V2.3-E：保存已删除日期时提示用户是否恢复） -->
+  <div id="revive-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <div class="modal-title">恢复已删除的记录</div>
+      <div class="modal-body">
+        日期 <b id="revive-date"></b> 此前已被删除。是否恢复并保存新数据？
+      </div>
+      <div class="modal-actions">
+        <button id="revive-cancel" class="btn-ghost">取消</button>
+        <button id="revive-confirm" class="btn-primary">恢复并保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Supabase JS SDK (UMD, 本地副本，支持离线首启) -->
+  <script src="./vendor/supabase.js"></script>
+  <!-- 离线本地数据层（原生 IndexedDB 封装，必须先于 app.js 加载） -->
+  <script src="./localdb.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
