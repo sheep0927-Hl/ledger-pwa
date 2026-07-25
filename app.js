@@ -526,7 +526,7 @@ function computeSalary(recs) {
   const sum = (k) => recs.reduce((a, r) => a + num(r[k]), 0);
   const sumXHS = sum('xhs'), sumDY = sum('dy'), sumRef = sum('refund');
   const sumNote = sum('note_qty'), sumMat = sum('material_qty'), sumVid = sum('video_qty');
-  const sumAssist = sum('assist');
+  const sumAssist = recs.reduce((a, r) => a + (isAssistVisible(r.date) ? num(r.assist) : 0), 0); // V2.6.1：仅计入 <2026-08-01 的助播（展示层）
 
   const refundCut = sumRef * CONFIG.price;
   const xhsAmt = sumXHS * CONFIG.price;
@@ -614,6 +614,8 @@ function updateTodaySummary() {
   $('s-out').textContent = fmtMoney(out);
   $('s-pub').textContent = fmtMoney(pub);
   $('s-assist').textContent = fmtMoney(r.assist);
+  // V2.6.1：2026-08-01 起隐藏今日金额汇总中的「助播」行（仅展示层，不影响保存/同步/合并）
+  $('row-s-assist').classList.toggle('hidden', !isAssistVisible(r.date));
 }
 
 /**
@@ -685,7 +687,7 @@ function renderHistory() {
             <span>小${r.xhs}</span><span>抖${r.dy}</span>
             <span class="neg">退${r.refund}</span>
             <span>图${r.note_qty}</span><span>素${r.material_qty}</span><span>视${r.video_qty}</span>
-            ${r.assist !== 0 ? `<span class="assist">助¥${r.assist}</span>` : ''}
+            ${(r.assist !== 0 && isAssistVisible(r.date)) ? `<span class="assist">助¥${r.assist}</span>` : ''}
           </div>
         </div>
         <div class="hrow-right">

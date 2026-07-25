@@ -7,7 +7,7 @@
 
   <!-- PWA / iOS 添加到主屏幕 -->
   <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#c62828" />
+  <meta name="theme-color" content="#E2554F" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -74,7 +74,7 @@
           <div class="summary-line"><span>出单净额</span><b id="s-net">0</b></div>
           <div class="summary-line"><span>出单金额</span><b id="s-out">¥0</b></div>
           <div class="summary-line"><span>发布额(图文+素材+视频)</span><b id="s-pub">¥0</b></div>
-          <div class="summary-line"><span>助播</span><b id="s-assist">¥0</b></div>
+          <div class="summary-line" id="row-s-assist"><span>助播</span><b id="s-assist">¥0</b></div>
         </div>
       </section>
 
@@ -107,13 +107,13 @@
     <!-- 底部导航 -->
     <nav class="tabbar">
       <button class="tab active" data-tab="today">
-        <span class="tab-ico">📝</span><span>今日</span>
+        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span>今日</span>
       </button>
       <button class="tab" data-tab="history">
-        <span class="tab-ico">📚</span><span>历史</span>
+        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span>历史</span>
       </button>
       <button class="tab" data-tab="salary">
-        <span class="tab-ico">💰</span><span>工资</span>
+        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Z"/><path d="M16 12h.01"/></svg></span><span>工资</span>
       </button>
     </nav>
   </div>

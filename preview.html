@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ledger PWA · iOS 原生风格预览</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* 仅用于预览外壳，不影响 PWA 本身 */
+    body { background: #e9e9ee; padding: 32px 16px 56px; }
+    .preview-head { max-width: 1040px; margin: 0 auto 28px; text-align: center; }
+    .preview-head h1 { font-family: -apple-system, "SF Pro Display", "PingFang SC", sans-serif; font-size: 26px; font-weight: 700; color: #111; margin: 0 0 6px; }
+    .preview-head p { font-family: -apple-system, "PingFang SC", sans-serif; color: #8E8E93; font-size: 14px; margin: 0; }
+    .phones { max-width: 1040px; margin: 0 auto; display: flex; gap: 28px; justify-content: center; flex-wrap: wrap; }
+
+    .phone {
+      width: 320px; flex: 0 0 auto;
+      background: #000; border-radius: 46px; padding: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.28);
+    }
+    .screen {
+      position: relative;            /* 建立包含块，约束内部 fixed 元素 */
+      transform: translateZ(0);
+      width: 100%; height: 660px;
+      background: #F2F2F7; border-radius: 34px; overflow: hidden;
+    }
+    .notch {
+      position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 130px; height: 26px; background: #000; border-radius: 0 0 16px 16px; z-index: 60;
+    }
+    .home-ind {
+      position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%);
+      width: 120px; height: 5px; background: rgba(0,0,0,.35); border-radius: 3px; z-index: 60;
+    }
+    .caption {
+      text-align: center; font-family: -apple-system, "PingFang SC", sans-serif;
+      font-size: 13px; color: #6b7280; margin-top: 12px; font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-head">
+    <h1>Ledger PWA · iOS 原生风格</h1>
+    <p>以下为基于真实 style.css 渲染的 iPhone 效果预览（今日 / 历史 / 工资 三个 Tab）</p>
+  </div>
+
+  <div class="phones">
+
+    <!-- ============ 今日 ============ -->
+    <div>
+      <div class="phone">
+        <div class="screen">
+          <div class="notch"></div>
+          <div class="app">
+            <header class="topbar">
+              <span class="sync-status online">在线</span>
+              <div class="topbar-title">今日</div>
+              <button class="topbar-logout">退出</button>
+            </header>
+            <main class="content">
+              <section class="view active today-view">
+                <div class="card-row"><label>日期</label><input type="date" value="2026-07-25" readonly /></div>
+                <div class="grid2">
+                  <div class="field"><label>小红书出单</label><input type="number" value="12" readonly /></div>
+                  <div class="field"><label>抖音出单</label><input type="number" value="8" readonly /></div>
+                  <div class="field"><label>退款</label><input type="number" value="1" readonly /></div>
+                  <div class="field"><label>助播</label><input type="number" value="160" readonly /></div>
+                  <div class="field"><label>图文</label><input type="number" value="5" readonly /></div>
+                  <div class="field"><label>素材</label><input type="number" value="3" readonly /></div>
+                  <div class="field"><label>视频</label><input type="number" value="2" readonly /></div>
+                </div>
+                <button class="btn-primary">保存记录</button>
+                <div class="card summary-card">
+                  <div class="summary-title">当日金额</div>
+                  <div class="summary-line"><span>出单净额</span><b>19</b></div>
+                  <div class="summary-line"><span>出单金额</span><b>¥76</b></div>
+                  <div class="summary-line"><span>发布额(图文+素材+视频)</span><b>¥92</b></div>
+                  <div class="summary-line"><span>助播</span><b>¥160</b></div>
+                </div>
+              </section>
+            </main>
+            <nav class="tabbar">
+              <button class="tab active" data-tab="today"><span class="tab-ico"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span>今日</span></button>
+              <button class="tab" data-tab="history"><span class="tab-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span>历史</span></button>
+              <button class="tab" data-tab="salary"><span class="tab-ico"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Z"/><path d="M16 12h.01"/></svg></span><span>工资</span></button>
+            </nav>
+          </div>
+          <div class="home-ind"></div>
+        </div>
+      </div>
+      <div class="caption">今日 · 分组表单 + Health 风格金额卡</div>
+    </div>
+
+    <!-- ============ 历史 ============ -->
+    <div>
+      <div class="phone">
+        <div class="screen">
+          <div class="notch"></div>
+          <div class="app">
+            <header class="topbar">
+              <span class="sync-status online">在线</span>
+              <div class="topbar-title">历史</div>
+              <button class="topbar-logout">退出</button>
+            </header>
+            <main class="content">
+              <section class="view active history-view">
+                <div class="history-list">
+                  <div class="hrow">
+                    <div class="hrow-main">
+                      <div class="hrow-date">2026-07-25</div>
+                      <div class="hrow-tags"><span>小12</span><span>抖8</span><span class="neg">退1</span><span>图5</span><span>素3</span><span>视2</span><span class="assist">助¥160</span></div>
+                    </div>
+                    <div class="hrow-right"><div class="hrow-total">¥328</div><div class="hrow-edit">编辑 ›</div></div>
+                  </div>
+                  <div class="hrow">
+                    <div class="hrow-main">
+                      <div class="hrow-date">2026-07-24</div>
+                      <div class="hrow-tags"><span>小30</span><span>抖18</span><span class="neg">退2</span><span>图10</span><span>素6</span><span>视4</span><span class="assist">助¥160</span></div>
+                    </div>
+                    <div class="hrow-right"><div class="hrow-total">¥668</div><div class="hrow-edit">编辑 ›</div></div>
+                  </div>
+                  <div class="hrow">
+                    <div class="hrow-main">
+                      <div class="hrow-date">2026-07-23</div>
+                      <div class="hrow-tags"><span>小22</span><span>抖14</span><span class="neg">退0</span><span>图8</span><span>素5</span><span>视3</span><span class="assist">助¥160</span></div>
+                    </div>
+                    <div class="hrow-right"><div class="hrow-total">¥516</div><div class="hrow-edit">编辑 ›</div></div>
+                  </div>
+                  <div class="hrow">
+                    <div class="hrow-main">
+                      <div class="hrow-date">2026-07-22</div>
+                      <div class="hrow-tags"><span>小9</span><span>抖7</span><span class="neg">退1</span><span>图4</span><span>素2</span><span>视1</span></div>
+                    </div>
+                    <div class="hrow-right"><div class="hrow-total">¥209</div><div class="hrow-edit">编辑 ›</div></div>
+                  </div>
+                </div>
+              </section>
+            </main>
+            <nav class="tabbar">
+              <button class="tab" data-tab="today"><span class="tab-ico"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span>今日</span></button>
+              <button class="tab active" data-tab="history"><span class="tab-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span>历史</span></button>
+              <button class="tab" data-tab="salary"><span class="tab-ico"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Z"/><path d="M16 12h.01"/></svg></span><span>工资</span></button>
+            </nav>
+          </div>
+          <div class="home-ind"></div>
+        </div>
+      </div>
+      <div class="caption">历史 · 卡片化记录列表</div>
+    </div>
+
+    <!-- ============ 工资 ============ -->
+    <div>
+      <div class="phone">
+        <div class="screen">
+          <div class="notch"></div>
+          <div class="app">
+            <header class="topbar">
+              <span class="sync-status online">在线</span>
+              <div class="topbar-title">工资</div>
+              <button class="topbar-logout">退出</button>
+            </header>
+            <main class="content">
+              <section class="view active salary-view">
+                <div class="card">
+                  <div class="grid2">
+                    <div class="card-row"><label>开始日期</label><input type="date" value="2026-07-01" readonly /></div>
+                    <div class="card-row"><label>结束日期</label><input type="date" value="2026-07-31" readonly /></div>
+                  </div>
+                  <div class="quick-range"><button class="chip">本月</button><button class="chip">上月</button><button class="chip">16→15 周期</button></div>
+                  <button class="btn-primary">计算工资</button>
+                </div>
+                <div class="card salary-card">
+                  <div class="sal-head">工资报表 <span class="sal-range">2026-07-01 ~ 2026-07-31</span></div>
+                  <div class="sal-row"><div class="sal-l">小红书出单<em>320 单</em></div><b>¥1,280</b></div>
+                  <div class="sal-row"><div class="sal-l">抖音出单<em>210 单</em></div><b>¥840</b></div>
+                  <div class="sal-row neg"><div class="sal-l">退款扣减<em>40 单</em></div><b>-¥160</b></div>
+                  <div class="sal-row strong"><div class="sal-l">直播出单收入</div><b>¥1,960</b></div>
+                  <div class="sal-div"></div>
+                  <div class="sal-row"><div class="sal-l">图文收入<em>120 条</em></div><b>¥480</b></div>
+                  <div class="sal-row"><div class="sal-l">素材收入<em>70 条</em></div><b>¥280</b></div>
+                  <div class="sal-row"><div class="sal-l">视频收入<em>36 条</em></div><b>¥1,080</b></div>
+                  <div class="sal-row strong"><div class="sal-l">账号笔记视频收入</div><b>¥1,840</b></div>
+                  <div class="sal-div"></div>
+                  <div class="sal-row"><div class="sal-l">底薪<em>已达标</em></div><b>¥2,000</b></div>
+                  <div class="sal-total"><span>应发总额</span><div class="sal-total-num">¥5,800</div></div>
+                </div>
+              </section>
+            </main>
+            <nav class="tabbar">
+              <button class="tab" data-tab="today"><span class="tab-ico"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span>今日</span></button>
+              <button class="tab" data-tab="history"><span class="tab-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span>历史</span></button>
+              <button class="tab active" data-tab="salary"><span class="tab-ico"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Z"/><path d="M16 12h.01"/></svg></span><span>工资</span></button>
+            </nav>
+          </div>
+          <div class="home-ind"></div>
+        </div>
+      </div>
+      <div class="caption">工资 · 报表卡片</div>
+    </div>
+
+    <!-- ============ 今日（2026-08-01，助播隐藏） ============ -->
+    <div>
+      <div class="phone">
+        <div class="screen">
+          <div class="notch"></div>
+          <div class="app">
+            <header class="topbar">
+              <span class="sync-status online">在线</span>
+              <div class="topbar-title">今日</div>
+              <button class="topbar-logout">退出</button>
+            </header>
+            <main class="content">
+              <section class="view active today-view">
+                <div class="card-row"><label>日期</label><input type="date" value="2026-08-01" readonly /></div>
+                <div class="grid2">
+                  <div class="field"><label>小红书出单</label><input type="number" value="20" readonly /></div>
+                  <div class="field"><label>抖音出单</label><input type="number" value="12" readonly /></div>
+                  <div class="field"><label>退款</label><input type="number" value="2" readonly /></div>
+                  <div class="field"><label>图文</label><input type="number" value="6" readonly /></div>
+                  <div class="field"><label>素材</label><input type="number" value="4" readonly /></div>
+                  <div class="field"><label>视频</label><input type="number" value="3" readonly /></div>
+                </div>
+                <button class="btn-primary">保存记录</button>
+                <div class="card summary-card">
+                  <div class="summary-title">当日金额</div>
+                  <div class="summary-line"><span>出单净额</span><b>30</b></div>
+                  <div class="summary-line"><span>出单金额</span><b>¥120</b></div>
+                  <div class="summary-line"><span>发布额(图文+素材+视频)</span><b>¥138</b></div>
+                </div>
+              </section>
+            </main>
+            <nav class="tabbar">
+              <button class="tab active" data-tab="today"><span class="tab-ico"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span>今日</span></button>
+              <button class="tab" data-tab="history"><span class="tab-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span>历史</span></button>
+              <button class="tab" data-tab="salary"><span class="tab-ico"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Z"/><path d="M16 12h.01"/></svg></span><span>工资</span></button>
+            </nav>
+          </div>
+          <div class="home-ind"></div>
+        </div>
+      </div>
+      <div class="caption">今日 · 2026-08-01（助播已隐藏）</div>
+    </div>
+
+  </div>
+</body>
+</html>
