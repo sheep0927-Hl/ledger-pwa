@@ -648,6 +648,9 @@ function openCalendar() {
   $('calendar-sheet').classList.remove('hidden');
 }
 function closeCalendar() { $('calendar-sheet').classList.add('hidden'); }
+// 月历月份切换（纯 UI 导航：仅调整 calYear/calMonth 并重渲染网格，不涉及任何日期/同步/DB 逻辑）
+function prevMonth() { calMonth--; if (calMonth < 1) { calMonth = 12; calYear--; } renderCalendar(); }
+function nextMonth() { calMonth++; if (calMonth > 12) { calMonth = 1; calYear++; } renderCalendar(); }
 function renderCalendar() {
   const cur = $('t-date').value || todayStr();
   $('cal-title').textContent = `${calYear}年${calMonth}月`;
@@ -1009,6 +1012,21 @@ function bindEvents() {
   if (navPrev) navPrev.addEventListener('click', prevDay);
   if (navNext) navNext.addEventListener('click', nextDay);
   if (navDate) navDate.addEventListener('click', openCalendar);
+
+  // 月历 Sheet 交互（纯 UI：月份切换 / 关闭，不动日期/同步/DB/计算逻辑）
+  const calPrev = $('cal-prev'), calNext = $('cal-next'), calDone = $('cal-done'), calToday = $('cal-today');
+  if (calPrev) calPrev.addEventListener('click', prevMonth);
+  if (calNext) calNext.addEventListener('click', nextMonth);
+  if (calDone) calDone.addEventListener('click', closeCalendar);
+  if (calToday) calToday.addEventListener('click', () => {
+    const t = todayStr();
+    calYear = +t.slice(0, 4); calMonth = +t.slice(5, 7);
+    renderCalendar();
+    $('t-date').value = t; $('t-date').dispatchEvent(new Event('change')); updateNavDate();
+  });
+  // 点击灰色遮罩关闭月历；白色面板内部点击不会触发（backdrop 与 panel 是并列元素，点击面板不会命中 backdrop）
+  const calBackdrop = $('cal-backdrop');
+  if (calBackdrop) calBackdrop.addEventListener('click', closeCalendar);
 
   // V3.0.1：显式切换日期 = 用户主动放弃当前未保存输入，先清 dirty 再回填
   $('t-date').addEventListener('change', () => { todayDirty = false; loadTodayInputs($('t-date').value); });
