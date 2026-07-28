@@ -37,45 +37,114 @@
   <!-- ============ 主应用 ============ -->
   <div id="app" class="app hidden">
 
-    <!-- 顶部栏 -->
-    <header class="topbar">
-      <span id="sync-status" class="sync-status">…</span>
-      <div class="topbar-title" id="topbar-title">今日</div>
-      <button id="logout-btn" class="topbar-logout" title="退出登录">退出</button>
+    <!-- 顶部导航栏（iOS 玻璃导航 + 日期切换） -->
+    <header class="topbar glass-nav">
+      <!-- 日期模式（今日页） -->
+      <div class="nav-datemode" id="nav-datemode">
+        <button id="nav-prev" class="nav-arrow" aria-label="前一天">‹</button>
+        <button id="nav-date" class="nav-date" aria-label="选择日期">
+          <span id="nav-date-main" class="nav-date-main">今天</span>
+          <span id="nav-date-sub" class="nav-date-sub">7月28日 周二</span>
+        </button>
+        <button id="nav-next" class="nav-arrow" aria-label="后一天">›</button>
+      </div>
+      <!-- 标题模式（历史 / 工资页） -->
+      <div class="nav-titlemode hidden" id="nav-titlemode">
+        <span id="topbar-title" class="topbar-title"></span>
+      </div>
+      <div class="nav-meta">
+        <span id="sync-status" class="sync-status" role="button" tabindex="0" title="点击立即同步">…</span>
+        <button id="logout-btn" class="topbar-logout" title="退出登录">退出</button>
+      </div>
     </header>
+
+    <!-- 月历弹层（点击日期展开，底部上滑 Sheet；Apple Calendar 风） -->
+    <div id="calendar-sheet" class="calendar-sheet hidden">
+      <div class="calendar-backdrop" id="cal-backdrop"></div>
+      <div class="calendar-panel glass" id="cal-panel">
+        <div class="calendar-head">
+          <button id="cal-prev" class="cal-nav" aria-label="上一月">‹</button>
+          <span id="cal-title" class="cal-title">2026年7月</span>
+          <button id="cal-next" class="cal-nav" aria-label="下一月">›</button>
+        </div>
+        <div class="calendar-weekdays">
+          <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+        </div>
+        <div id="cal-grid" class="calendar-grid"></div>
+        <div class="calendar-foot">
+          <button id="cal-today" class="cal-today-btn">今天</button>
+          <button id="cal-done" class="cal-done-btn">完成</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 全局提示 banner（如缺少 material_qty 列） -->
     <div id="global-banner" class="banner hidden"></div>
 
     <main class="content">
 
-      <!-- ---------- 今日 ---------- -->
+      <!-- ---------- 今日（V3.0 · Health/Wallet 融合） ---------- -->
       <section id="today-view" class="view active">
-        <div class="card">
-          <div class="card-row">
-            <label>日期</label>
-            <input id="t-date" type="date" />
+
+        <!-- 状态源日期输入（隐藏，由顶部导航驱动，不可删除） -->
+        <input id="t-date" type="date" class="hero-date" />
+
+        <!-- Wallet / Health 净收入卡（复用 s-* id + 新增 s-net-money / s-refund-money） -->
+        <div class="card net-card">
+          <div class="net-label">今日收入</div>
+          <div class="net-amount"><b id="s-net-money">0</b></div>
+          <div class="net-pills">
+            <span class="pill out">出单 <b id="s-out">¥0</b></span>
+            <span class="pill pub">发布 <b id="s-pub">¥0</b></span>
+            <span class="pill ref">退款 <b id="s-refund-money">¥0</b></span>
+            <span class="pill ass" id="row-s-assist">助播 <b id="s-assist">¥0</b></span>
           </div>
-          <div class="grid2">
-            <div class="field"><label>小红书出单 (xhs)</label><input id="t-xhs" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
-            <div class="field"><label>抖音出单 (dy)</label><input id="t-dy" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
-            <div class="field"><label>退款 (refund)</label><input id="t-refund" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
-            <div class="field" id="row-t-assist"><label>助播 (assist ¥)</label><input id="t-assist" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
-            <div class="field"><label>图文 (noteQty)</label><input id="t-note" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
-            <div class="field"><label>素材 (materialQty)</label><input id="t-material" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
-            <div class="field"><label>视频 (videoQty)</label><input id="t-video" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
-          </div>
-          <button id="t-save" class="btn-primary">保存记录</button>
-          <div id="t-status" class="hint"></div>
+          <div class="net-sub">今日 <b id="s-net">0</b> 笔</div>
         </div>
 
-        <div class="card summary-card">
-          <div class="summary-title">当日金额</div>
-          <div class="summary-line"><span>出单净额</span><b id="s-net">0</b></div>
-          <div class="summary-line"><span>出单金额</span><b id="s-out">¥0</b></div>
-          <div class="summary-line"><span>发布额(图文+素材+视频)</span><b id="s-pub">¥0</b></div>
-          <div class="summary-line" id="row-s-assist"><span>助播</span><b id="s-assist">¥0</b></div>
+        <!-- 数据录入（真实 7 字段，顺序不变：小红书→抖音→退款→助播→图文→素材→视频） -->
+        <div class="section-title">数据录入</div>
+        <div class="card entry-card">
+          <div class="entry-row">
+            <span class="f-ic" style="background:#E4B6B0"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 4v16"/></svg></span>
+            <span class="f-name">小红书出单</span>
+            <input id="t-xhs" type="number" inputmode="numeric" min="0" placeholder="0" />
+          </div>
+          <div class="entry-row">
+            <span class="f-ic" style="background:#6B6B70"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg></span>
+            <span class="f-name">抖音出单</span>
+            <input id="t-dy" type="number" inputmode="numeric" min="0" placeholder="0" />
+          </div>
+          <div class="entry-row">
+            <span class="f-ic" style="background:#E6C49E"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7"/></svg></span>
+            <span class="f-name">退款</span>
+            <input id="t-refund" type="number" inputmode="numeric" min="0" placeholder="0" />
+          </div>
+          <div class="entry-row" id="row-t-assist">
+            <span class="f-ic" style="background:#AECBBB"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>
+            <span class="f-name">助播</span>
+            <input id="t-assist" type="number" inputmode="numeric" min="0" placeholder="0" />
+          </div>
+          <div class="entry-row">
+            <span class="f-ic" style="background:#B2C9E9"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg></span>
+            <span class="f-name">图文</span>
+            <input id="t-note" type="number" inputmode="numeric" min="0" placeholder="0" />
+          </div>
+          <div class="entry-row">
+            <span class="f-ic" style="background:#B9D2D6"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg></span>
+            <span class="f-name">素材</span>
+            <input id="t-material" type="number" inputmode="numeric" min="0" placeholder="0" />
+          </div>
+          <div class="entry-row">
+            <span class="f-ic" style="background:#CBB8DE"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7 4 19 12 7 20 7 4"/></svg></span>
+            <span class="f-name">视频</span>
+            <input id="t-video" type="number" inputmode="numeric" min="0" placeholder="0" />
+          </div>
         </div>
+
+        <button id="t-save" class="btn-primary">保存记录</button>
+        <div id="t-status" class="hint"></div>
+
       </section>
 
       <!-- ---------- 历史 ---------- -->

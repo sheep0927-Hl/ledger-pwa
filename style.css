@@ -1,17 +1,19 @@
 /* ============================================================
- * 总账 Ledger — PWA 样式（iOS Human Interface Guidelines 风格）
- * 仅改 UI/交互，逻辑/数据/同步/DOM 结构不变。
- * 设计令牌参考 SF Pro / iOS 17：浅灰分组背景、白卡片、圆角、轻阴影、
- * 半透明磨砂导航与标签栏、系统字体、降低饱和度的品牌红。
+ * 总账 Ledger — PWA 样式（V3.0 · Health/Wallet 融合风格）
+ * Phase 3A：合并 V3.0 E 验收通过的视觉方案到生产 UI。
+ * 保护范围：业务逻辑 / 数据 / 同步 / DOM 结构(id) 不变。
+ * 本文件为纯 UI/视觉重写，保留所有既有 class 名（login / topbar /
+ * sync-status / view / card / card-row / grid2 / field / hint /
+ * summary / history / salary / tabbar / sheet / modal / banner）。
  * ============================================================ */
 :root {
   /* 颜色 */
-  --brand: #E2554F;          /* 品牌红（降低饱和度） */
+  --brand: #E2554F;          /* 品牌红（与 V2.6 一致，避免改动品牌身份） */
   --brand-dark: #C8433D;
   --brand-tint: #FBECEB;     /* 浅红底（危险/标签） */
   --bg: #F2F2F7;             /* iOS 分组背景 */
   --card: #FFFFFF;
-  --text: #111111;           /* 主标题 */
+  --text: #1C1C1E;           /* 主文字（V3.0 略深） */
   --text-sub: #8E8E93;       /* 次级标签（iOS gray） */
   --text-tert: #C7C7CC;      /* 三级 / 分隔线 */
   --line: #E5E5EA;           /* 发丝分隔线 */
@@ -19,19 +21,21 @@
   --neg: #34C759;            /* iOS 绿（退款/负值，国内跌=绿） */
   /* 圆角 */
   --r-card: 16px;
-  --r-btn: 14px;
+  --r-big: 20px;
+  --r-btn: 16px;
   --r-sm: 12px;
   /* 尺寸 */
-  --topbar-h: 44px;          /* 导航栏内容高度（含安全区 ≈ 88px） */
-  --tabbar-h: 50px;
-  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 18px rgba(0,0,0,.04);
+  --topbar-h: 44px;          /* 导航栏内容高度（含安全区） */
+  --tabbar-h: 83px;          /* V3.0：加高毛玻璃 TabBar */
+  --shadow: 0 1px 2px rgba(0,0,0,.04);
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+          "PingFang SC", "Helvetica Neue", Arial, sans-serif;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body {
   margin: 0; padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
-               "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font);
   background: var(--bg); color: var(--text);
   font-size: 16px; line-height: 1.4;
   -webkit-font-smoothing: antialiased;
@@ -40,7 +44,7 @@ html, body {
 input, button { font-family: inherit; }
 .hidden { display: none !important; }
 
-/* ---------- 登录（iOS 居中卡片风格） ---------- */
+/* ---------- 登录（iOS 居中卡片风格 · 不变） ---------- */
 .login-view {
   min-height: 100vh; min-height: 100dvh;
   display: flex; align-items: center; justify-content: center;
@@ -49,8 +53,7 @@ input, button { font-family: inherit; }
 .login-card {
   width: 100%; max-width: 340px;
   background: transparent; border-radius: 0;
-  padding: 0; text-align: center;
-  box-shadow: none;
+  padding: 0; text-align: center; box-shadow: none;
 }
 .login-logo {
   width: 76px; height: 76px; margin: 0 auto 20px;
@@ -70,15 +73,37 @@ input, button { font-family: inherit; }
 .login-card input:focus { outline: none; border-color: var(--brand); background: #fff; }
 .msg { color: var(--brand); font-size: 13px; margin-top: 10px; min-height: 18px; }
 
-/* ---------- 按钮（iOS 主按钮风格） ---------- */
+/* ---------- 按钮（iOS 主按钮系统 · 模块4：Save Button System） ---------- */
 .btn-primary {
-  width: 100%; height: 52px; border: none; border-radius: 16px;
-  background: var(--brand); color: #fff; font-size: 18px; font-weight: 600;
-  cursor: pointer; letter-spacing: .3px;
-  transition: transform .15s ease, background .15s ease, opacity .15s ease;
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  width: 100%; height: 50px;
+  border: none; border-radius: 14px;
+  background: var(--brand); color: #fff;
+  font-size: 17px; font-weight: 600; letter-spacing: .2px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background .12s ease, transform .12s ease, opacity .12s ease;
 }
-.btn-primary:active { transform: scale(.97); background: var(--brand-dark); }
-.btn-primary:disabled { opacity: .55; transform: none; }
+/* Pressed：轻微变深 + 极克制回弹（iOS 手感，非 Material 缩放） */
+.btn-primary:active,
+.btn-primary.is-pressed { background: var(--brand-dark); transform: scale(.985); }
+/* 键盘聚焦描边（仅键盘可达，不影响触摸） */
+.btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 4px rgba(226,85,79,.22); }
+/* Loading：app.js 保存时设置 disabled + 文案“保存中…” → 直接接住原生 hook，无需改 JS */
+.btn-primary:disabled {
+  background: var(--brand); opacity: .6; cursor: default; transform: none;
+}
+.btn-primary:disabled::before {
+  content: ""; width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,.5); border-top-color: #fff;
+  border-radius: 50%; animation: btn-spin .7s linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+/* Disabled：纯禁用态（静态、无 spinner），规范四态之一，供只读/未填场景 */
+.btn-primary.is-disabled {
+  background: rgba(226,85,79,.16); color: rgba(226,85,79,.5);
+  cursor: default; transform: none;
+}
 .btn-ghost {
   padding: 12px 18px; border: 1px solid var(--line); border-radius: var(--r-sm);
   background: #fff; color: var(--text); font-size: 15px;
@@ -93,18 +118,135 @@ input, button { font-family: inherit; }
 /* ---------- 应用骨架 ---------- */
 .app { min-height: 100vh; min-height: 100dvh; background: var(--bg); }
 
-/* 顶部导航栏（iOS Navigation Bar：半透明磨砂、白底、无大红） */
+/* 顶部导航栏（iOS 玻璃导航栏 · Liquid Glass 质感） */
 .topbar {
-  position: sticky; top: 0; z-index: 20;
+  position: sticky; top: 0; z-index: 30;
   padding-top: env(safe-area-inset-top);
   min-height: calc(var(--topbar-h) + env(safe-area-inset-top));
-  background: rgba(255,255,255,.82);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 1px solid rgba(0,0,0,.06);
-  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.72);
+  backdrop-filter: saturate(180%) blur(26px);
+  -webkit-backdrop-filter: saturate(180%) blur(26px);
+  border-bottom: 1px solid rgba(0,0,0,.05);
+  display: flex; flex-direction: column; align-items: stretch;
 }
+.nav-datemode, .nav-titlemode {
+  display: flex; align-items: center; justify-content: center;
+  height: var(--topbar-h); position: relative;
+}
+.nav-titlemode { font-size: 17px; font-weight: 600; color: var(--text); }
 .topbar-title { font-size: 17px; font-weight: 600; color: var(--text); letter-spacing: .2px; }
+
+/* 日期切换簇：‹ 日期 › */
+.nav-arrow {
+  width: 32px; height: 32px; border-radius: 50%; border: none;
+  background: rgba(120,120,128,.12); color: var(--text);
+  font-size: 22px; font-weight: 600; line-height: 1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: transform .12s ease, background .15s ease;
+}
+.nav-arrow:active { transform: scale(.86); background: rgba(120,120,128,.22); }
+.nav-date {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; background: none; border: none; padding: 3px 14px; border-radius: 14px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background .15s ease;
+}
+.nav-date:active { background: rgba(0,0,0,.06); }
+.nav-date-main { font-size: 17px; font-weight: 600; color: var(--text); letter-spacing: .2px; }
+.nav-date-sub { font-size: 11px; font-weight: 500; color: var(--text-sub); }
+
+/* 右上角：同步状态 + 退出 */
+.nav-meta {
+  position: absolute; right: 10px; top: calc(env(safe-area-inset-top) + 7px);
+  display: flex; align-items: center; gap: 8px;
+}
+.topbar-logout {
+  border: none; background: rgba(120,120,128,.12); color: var(--text-sub);
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  transition: background .15s ease;
+}
+.topbar-logout:active { background: rgba(120,120,128,.22); }
+
+/* ---------- 月历弹层（Apple Calendar 风 · 模块5） ---------- */
+.calendar-sheet { position: fixed; inset: 0; z-index: 40; }
+.calendar-backdrop {
+  position: absolute; inset: 0; background: rgba(0,0,0,.18);
+  opacity: 0; transition: opacity .3s ease;
+}
+.calendar-sheet:not(.hidden) .calendar-backdrop { opacity: 1; }
+.calendar-panel {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 18px 16px calc(env(safe-area-inset-bottom) + 10px);
+  background: rgba(255,255,255,.82);
+  backdrop-filter: saturate(180%) blur(30px);
+  -webkit-backdrop-filter: saturate(180%) blur(30px);
+  border-top-left-radius: 22px; border-top-right-radius: 22px;
+  border-top: .5px solid rgba(0,0,0,.06);
+  box-shadow: 0 -6px 24px rgba(0,0,0,.07);
+  transform: translateY(100%);
+  transition: transform .3s cubic-bezier(.32,.72,0,1);
+}
+.calendar-sheet:not(.hidden) .calendar-panel { transform: translateY(0); }
+.calendar-head { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 10px; }
+.cal-title { font-size: 20px; font-weight: 600; color: var(--text); min-width: 120px; text-align: center; letter-spacing: -.1px; }
+.cal-nav {
+  width: 32px; height: 32px; border-radius: 50%; border: none;
+  background: rgba(120,120,128,.12); color: var(--text);
+  font-size: 20px; font-weight: 500; line-height: 1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background .15s ease;
+}
+.cal-nav:active { background: rgba(120,120,128,.24); }
+.calendar-weekdays {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); text-align: center;
+  font-size: 11px; color: #AEAEB2; font-weight: 500; margin-bottom: 4px;
+}
+.calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px 5px; }
+.cal-cell {
+  aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+  font-size: 16.5px; color: #1C1C1E; border-radius: 50%;
+  cursor: pointer; position: relative; transition: background .15s ease, transform .12s ease;
+}
+.cal-cell.empty { visibility: hidden; cursor: default; }
+.cal-cell:active { transform: scale(.9); }
+/* 今天：克制的小红圆（Apple Calendar 风，圈/点偏细） */
+.cal-cell.today-cell { background: transparent; color: #fff; font-weight: 500; }
+.cal-cell.today-cell::before {
+  content: ''; position: absolute; inset: 20%;
+  background: var(--brand); border-radius: 50%; z-index: -1;
+}
+/* 选中：蓝色细圆环描边（Apple Calendar） */
+.cal-cell.selected {
+  box-shadow: inset 0 0 0 1px #007AFF;
+  color: #007AFF; font-weight: 500;
+}
+/* 今天且被选中：小红圆 + 蓝细环 */
+.cal-cell.today-cell.selected { box-shadow: inset 0 0 0 1px #007AFF; }
+/* 有数据小圆点 */
+.cal-cell.has-data::after {
+  content: ''; position: absolute; bottom: 5px; width: 4px; height: 4px;
+  border-radius: 50%; background: var(--neg);
+}
+.cal-cell.today-cell.has-data::after { background: #fff; bottom: 16%; }
+.cal-cell.selected.has-data::after { background: #007AFF; }
+.calendar-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding: 0 10px; }
+.cal-today-btn, .cal-done-btn {
+  padding: 4px 8px; border-radius: 10px; border: none;
+  font-size: 17px; font-weight: 600; cursor: pointer; background: none;
+  transition: opacity .15s ease;
+}
+.cal-today-btn { color: var(--text-sub); }
+.cal-done-btn { color: #007AFF; }
+.cal-today-btn:active, .cal-done-btn:active { opacity: .5; }
+
+/* 今日页：日期切换轻微滑动（Spring 感） */
+@keyframes dateSwapNext { from { opacity: .35; transform: translateX(26px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes dateSwapPrev { from { opacity: .35; transform: translateX(-26px); } to { opacity: 1; transform: translateX(0); } }
+#today-view.anim-next { animation: dateSwapNext .26s cubic-bezier(.32,.72,0,1); }
+#today-view.anim-prev { animation: dateSwapPrev .26s cubic-bezier(.32,.72,0,1); }
+
+/* 隐藏被导航栏接管的原生日期输入（仍作为状态源保留在 DOM 中） */
+.hero-date { display: none; }
 
 /* 左侧在线状态：iOS 风格胶囊（绿点 + 文字，文字由 app.js 注入） */
 .sync-status {
@@ -114,8 +256,10 @@ input, button { font-family: inherit; }
   height: 22px; padding: 0 10px 0 9px; border-radius: 999px;
   font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: .2px;
   color: #34C759; background: rgba(52,199,89,.12);
-  transition: color .2s ease, background .2s ease;
+  transition: color .2s ease, background .2s ease, transform .12s ease;
+  cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
 }
+.sync-status:active { transform: scale(.94); }
 .sync-status::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
   background: currentColor; flex: 0 0 auto;
@@ -125,17 +269,18 @@ input, button { font-family: inherit; }
 .sync-status.pending { color: #FF9F0A; background: rgba(255,159,10,.12); }
 .sync-status.syncing { color: #007AFF; background: rgba(0,122,255,.12); }
 
-/* 右侧退出（iOS 导航栏文字按钮） */
+/* 右侧退出 */
 .topbar-logout {
   position: absolute; right: 12px;
   top: calc(env(safe-area-inset-top) + 5px);
   background: none; border: none; color: var(--brand);
   font-size: 17px; font-weight: 400; padding: 8px 8px;
+  white-space: nowrap; line-height: 1;
 }
 .topbar-logout:active { opacity: .45; }
 
 .content {
-  padding: 16px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 28px);
+  padding: 12px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 24px);
 }
 
 /* ---------- banner ---------- */
@@ -151,16 +296,101 @@ input, button { font-family: inherit; }
 /* ---------- 卡片通用 ---------- */
 .card {
   background: var(--card); border-radius: var(--r-card);
-  padding: 16px; margin-bottom: 16px;
-  box-shadow: var(--shadow);
+  padding: 16px; margin-bottom: 16px; box-shadow: var(--shadow);
 }
 
-/* 今日页：让内部字段各自成为分组卡片，外层容器透明 */
-.today-view > .card { background: none; box-shadow: none; padding: 0; margin-bottom: 0; }
-.today-view > .summary-card { background: var(--card); box-shadow: var(--shadow); padding: 18px 16px; margin-bottom: 16px; }
-.today-view > .btn-primary { margin-top: 18px; }
+/* ============================================================
+ * V3.0 今日页 Hero（大标题 + 日期副标题 + 天气占位）
+ * ============================================================ */
+.today-hero { padding: 6px 4px 2px; }
+.hero-row { display: flex; align-items: flex-start; justify-content: space-between; }
+.hero-left { display: flex; flex-direction: column; }
+.hero-title { font-size: 34px; font-weight: 800; letter-spacing: -.6px; line-height: 1.1; }
+.hero-date {
+  border: none; background: transparent; font-size: 15px; color: var(--text-sub);
+  font-weight: 500; margin-top: 4px; padding: 0; outline: none;
+  -webkit-appearance: none; appearance: none; font-variant-numeric: tabular-nums;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='20' viewBox='0 0 12 20'><path d='M2 2l8 8-8 8' fill='none' stroke='%23C7C7CC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right center;
+  padding-right: 20px;
+}
+.weather-widget {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 9px 13px; border-radius: 16px; background: rgba(0,122,255,.08); flex: none;
+}
+.weather-widget svg { width: 22px; height: 22px; }
+.weather-widget .wt { font-size: 17px; font-weight: 700; line-height: 1.1; }
+.weather-widget .wd { font-size: 11px; color: var(--text-sub); }
 
-/* ---------- 分组表单字段（iOS Grouped Form 卡片） ---------- */
+/* ============================================================
+ * V3.0 净收入卡（Wallet/Health 融合）
+ * 复用既有 id：s-net / s-out / s-pub / s-assist / row-s-assist
+ * 新增展示 id：s-net-money / s-refund-money（仅 UI 绑定，见 app.js）
+ * ============================================================ */
+.net-card {
+  border-radius: var(--r-big); padding: 9px 20px 8px;
+  background: rgba(255,255,255,.32);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  border: .5px solid rgba(255,255,255,.28);
+  box-shadow: none;
+}
+.net-label { font-size: 12.5px; color: var(--text-tert); font-weight: 400; letter-spacing: .2px; }
+.net-amount {
+  font-size: 46px; font-weight: 600; letter-spacing: -1px; margin-top: 2px;
+  line-height: 1.04;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.net-amount b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.net-pills { display: none; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 999px;
+}
+.pill.out { background: rgba(255,69,58,.12); color: #FF2D55; }
+.pill.pub { background: rgba(0,122,255,.12); color: #007AFF; }
+.pill.ref { background: rgba(255,159,10,.14); color: #FF9F0A; }
+.pill.ass { background: rgba(52,199,89,.14); color: #1E8E3E; }
+.net-sub { font-size: 12.5px; color: var(--text-tert); font-weight: 400; margin-top: 5px; }
+.net-sub b { color: var(--text-tert); font-variant-numeric: tabular-nums; font-weight: 400; }
+
+/* ============================================================
+ * V3.0 数据录入（iOS Grouped List，彩色 SVG 图标，顺序不变）
+ * 真实字段：小红书→抖音→退款→助播→图文→素材→视频
+ * ============================================================ */
+.section-title { font-size: 13px; color: var(--text-sub); font-weight: 600; padding: 2px 4px 4px; margin-top: 2px; }
+.entry-card { padding: 0; overflow: hidden; box-shadow: none; }
+.entry-row {
+  display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 16px;
+  border-top: .5px solid rgba(60,60,67,.06); background: transparent;
+  transition: background .15s ease;
+}
+.entry-row:first-of-type { border-top: none; }
+.entry-row:focus-within { background: rgba(0,122,255,.05); }
+.f-ic {
+  width: 24px; height: 24px; border-radius: 6px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.f-ic svg { width: 13px; height: 13px; }
+.f-name { font-size: 14px; color: #8E8E93; flex: 0 0 auto; font-weight: 400; margin-right: 12px; }
+.entry-row input {
+  flex: 1; min-width: 0;
+  border: none; background: transparent;
+  font-size: 27px; font-weight: 700; color: var(--text);
+  text-align: right; padding: 12px 4px; outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.entry-row input::placeholder { color: var(--text-tert); font-weight: 500; }
+.entry-row input:focus { outline: none; }
+.entry-row input[type=number]::-webkit-inner-spin-button,
+.entry-row input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.entry-row input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+
+/* 今日页主按钮与状态 */
+#today-view > .btn-primary { margin-top: 18px; }
+.hint { font-size: 12px; color: var(--text-sub); margin-top: 12px; min-height: 16px; text-align: center; }
+
+/* ---------- 分组表单字段（编辑弹层 / 工资页 · 保持原样） ---------- */
 .card-row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   background: var(--card); border-radius: var(--r-card);
@@ -172,8 +402,7 @@ input, button { font-family: inherit; }
   text-align: right; padding: 0 20px 0 0; outline: none; -webkit-appearance: none; appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='20' viewBox='0 0 12 20'><path d='M2 2l8 8-8 8' fill='none' stroke='%23C7C7CC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat; background-position: right center;
-  font-variant-numeric: tabular-nums; border-radius: 10px;
-  transition: box-shadow .15s ease;
+  font-variant-numeric: tabular-nums; border-radius: 10px; transition: box-shadow .15s ease;
 }
 .card-row input[type="date"]:focus { box-shadow: 0 0 0 3px rgba(0,122,255,.18); }
 
@@ -189,82 +418,101 @@ input, button { font-family: inherit; }
 .field input {
   width: 100%; border: none; background: transparent;
   font-size: 30px; font-weight: 600; color: var(--text);
-  text-align: right; padding: 0; outline: none;
-  font-variant-numeric: tabular-nums;
+  text-align: right; padding: 0; outline: none; font-variant-numeric: tabular-nums;
 }
 .field input::placeholder { color: var(--text-tert); font-weight: 500; }
-.field input:focus {
-  box-shadow: 0 0 0 3px rgba(0,122,255,.18); border-radius: 10px;
-  transition: box-shadow .15s ease;
-}
+.field input:focus { box-shadow: 0 0 0 3px rgba(0,122,255,.18); border-radius: 10px; transition: box-shadow .15s ease; }
 .field input[type=number]::-webkit-inner-spin-button,
 .field input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .field input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 
-.hint { font-size: 12px; color: var(--text-sub); margin-top: 12px; min-height: 16px; text-align: center; }
-
-/* ---------- 当日金额卡（Apple Health 风格） ---------- */
-.summary-card .summary-title {
-  font-size: 13px; color: var(--text-sub); margin-bottom: 12px; letter-spacing: .3px;
+/* ---------- 历史（iOS 分组列表 · 模块6） ---------- */
+.history-list { display: flex; flex-direction: column; gap: 20px; }
+.hgroup { }
+.hgroup-head {
+  font-size: 15px; font-weight: 600; color: var(--text-sub);
+  padding: 0 4px 6px; letter-spacing: 0;
 }
-.summary-line { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 0; }
-.summary-line:first-of-type { padding-top: 0; }
-.summary-line span { font-size: 14px; color: var(--text-sub); }
-.summary-line b {
-  font-size: 22px; font-weight: 600; color: var(--text);
-  font-variant-numeric: tabular-nums; letter-spacing: .2px;
-}
-
-/* ---------- 历史 ---------- */
-.history-list { display: flex; flex-direction: column; gap: 12px; }
-.hrow {
+.hgroup-body {
   background: var(--card); border-radius: var(--r-card);
-  padding: 14px 16px; display: flex; justify-content: space-between; align-items: center;
-  box-shadow: var(--shadow);
+  overflow: hidden;
 }
+.hrow {
+  background: transparent; padding: 18px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+  border-top: .5px solid rgba(60,60,67,.10);
+}
+.hrow:first-child { border-top: none; }
 .hrow:active { background: var(--fill); }
 .hrow-main { min-width: 0; }
 .hrow-date { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text); font-variant-numeric: tabular-nums; }
 .hrow-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .hrow-tags span {
   font-size: 11px; color: var(--text-sub);
-  background: var(--fill); border-radius: 6px; padding: 2px 7px;
+  background: rgba(118,118,128,.10); border-radius: 6px; padding: 2px 7px;
   font-variant-numeric: tabular-nums;
 }
-.hrow-tags .neg { color: var(--neg); background: #E7F8EE; }
-.hrow-tags .assist { color: var(--brand); background: var(--brand-tint); }
+.hrow-tags .neg { color: var(--text-sub); background: rgba(118,118,128,.10); }
+.hrow-tags .assist { color: var(--text-sub); background: rgba(118,118,128,.10); }
 .hrow-right { text-align: right; white-space: nowrap; margin-left: 12px; }
-.hrow-total { font-size: 17px; font-weight: 700; color: var(--brand); font-variant-numeric: tabular-nums; }
-.hrow-edit { font-size: 12px; color: var(--text-sub); margin-top: 5px; }
+.hrow-total { font-size: 17px; font-weight: 600; color: var(--brand); font-variant-numeric: tabular-nums; }
+.hrow-edit { font-size: 13px; color: #AEAEB2; margin-top: 4px; }
+.hgroup-foot {
+  font-size: 13px; color: #AEAEB2; font-weight: 400;
+  padding: 7px 16px; font-variant-numeric: tabular-nums;
+}
 .empty { text-align: center; color: var(--text-sub); padding: 60px 20px; font-size: 14px; }
 
-/* ---------- 工资 ---------- */
+/* ---------- 工资（iOS：Wallet 汇总 + 分组列表 · 模块7） ---------- */
 .quick-range { display: flex; gap: 8px; margin-bottom: 16px; }
 .chip {
-  flex: 1; padding: 10px 4px; border: none; border-radius: var(--r-sm);
-  background: var(--fill); font-size: 13px; color: var(--text); font-weight: 500;
+  flex: 1; height: 33px; padding: 0 10px; border: none; border-radius: 12px;
+  background: rgba(118,118,128,.08); font-size: 13px; color: var(--text); font-weight: 500;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s ease;
 }
-.chip:active { background: #DCDCE0; }
-.salary-card { padding: 18px 16px; }
-.sal-head { font-size: 17px; font-weight: 700; margin-bottom: 14px; color: var(--text); }
-.sal-range { font-size: 12px; color: var(--text-sub); font-weight: 400; display: block; margin-top: 3px; }
-.sal-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; font-size: 15px; }
+.chip:active { background: rgba(118,118,128,.16); }
+/* 工资页日期输入框：降低存在感（模块7 精修） */
+#salary-view .field { padding: 11px 16px; }
+#salary-view .field input[type="date"] { font-size: 17px; font-weight: 600; text-align: left; }
+#salary-view .field input[type="date"]::-webkit-calendar-picker-indicator {
+  width: 18px; height: 18px; opacity: .45; cursor: pointer; margin-left: 6px;
+}
+/* 计算按钮与报表之间增加呼吸空间 */
+#salary-view #sal-calc { margin-bottom: 16px; }
+
+/* 报表：iOS 分组列表（连续白卡 + 极淡发丝线 + 段间背景间隙） */
+.salary-card { padding: 0; box-shadow: none; overflow: hidden; }
+.sal-head {
+  font-size: 15px; font-weight: 600; color: var(--text-sub);
+  padding: 14px 16px 8px; letter-spacing: 0;
+}
+.sal-range { font-size: 13px; color: var(--text-sub); font-weight: 400; display: block; margin-top: 2px; }
+.sal-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 13px 16px; font-size: 15px; color: var(--text);
+  border-top: .5px solid rgba(60,60,67,.10);
+}
+.sal-row:first-of-type { border-top: none; }
 .sal-row .sal-l { display: flex; flex-direction: column; }
 .sal-row .sal-l em { font-style: normal; font-size: 11px; color: var(--text-sub); margin-top: 3px; }
-.sal-row b { font-variant-numeric: tabular-nums; font-size: 16px; }
-.sal-row.strong { font-weight: 700; }
+.sal-row b { font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 500; color: var(--text); }
+.sal-row.strong { font-weight: 600; }
 .sal-row.strong b { font-size: 17px; }
 .sal-row.neg b { color: var(--neg); }
 .sal-row.muted { color: var(--text-sub); }
-.sal-div { height: 1px; background: var(--line); margin: 6px 0; }
-.sal-total { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
-.sal-total > span { font-size: 15px; font-weight: 700; color: var(--text); }
+.sal-row.muted b { color: var(--text-sub); }
+/* 分组之间的背景间隙（iOS grouped section 之间的留白） */
+.sal-div { height: 8px; background: var(--bg); margin: 0; }
+/* 合计：底部强调块 */
+.sal-total { padding: 16px; border-top: .5px solid rgba(60,60,67,.10); margin: 0; }
+.sal-total > span { font-size: 13px; font-weight: 400; color: var(--text-tert); }
 .sal-total-num {
-  font-size: 34px; font-weight: 800; color: var(--brand);
-  text-align: right; font-variant-numeric: tabular-nums; margin-top: 6px; letter-spacing: .5px;
+  font-size: 40px; font-weight: 600; color: var(--brand);
+  text-align: right; font-variant-numeric: tabular-nums; margin-top: 4px; letter-spacing: -.5px;
 }
 
-/* ---------- 底部标签栏（iOS TabBar：毛玻璃、SF Symbols 风格图标） ---------- */
+/* ---------- 底部标签栏（iOS TabBar：毛玻璃、SF Symbols 风格图标、安全区） ---------- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
   height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
@@ -277,9 +525,8 @@ input, button { font-family: inherit; }
 }
 .tab {
   flex: 1; border: none; background: none;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  color: var(--text-sub); font-size: 10px; font-weight: 500; cursor: pointer;
-  padding: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  color: var(--text-sub); font-size: 11px; font-weight: 500; cursor: pointer; padding: 0;
 }
 .tab .tab-ico { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; color: inherit; }
 .tab .tab-ico svg {

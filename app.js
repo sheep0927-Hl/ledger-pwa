@@ -65,6 +65,7 @@ let hasMaterialColumn = true;  // 云端是否存在 material_qty 列（探测�
 let hasFieldStamps = false;    // 云端是否存在 *_modified_at 字段级时间戳列（迁移05执行后为 true）
 let hasDeletedColumn = true;   // 云端是否存在 deleted_at 软删除列（迁移06执行后为 true）
 let autoPullTimer = null;      // 自动拉取定时器句柄（避免重复启动多个定时器）
+let todayDirty = false;        // V3.0.1：今日表单存在未保存的手动输入（仅展示层守卫，不参与同步/合并）
 
 const FIELDS = ['xhs', 'dy', 'refund', 'assist', 'note_qty', 'material_qty', 'video_qty'];
 
@@ -263,6 +264,7 @@ async function loadRecords() {
 function startAutoPull() {
   if (autoPullTimer !== null) return;
   autoPullTimer = setInterval(() => {
+    console.log('[TEMP-DEBUG] AUTOPULL', todayDirty);   // 探针6：30s 自动拉取时 dirty 状态
     loadRecords();                 // 双向同步（行为不变）
     updateSyncStatus();            // 刷新待同步计数显示
     if (navigator.onLine) flushPending();   // 定时补推（flushPending 自带防重入）
@@ -360,6 +362,7 @@ async function cloudDelete(date, deletedAt) {
  * 若云端缺少 material_qty 或 *_modified_at 列，自动去掉对应字段重试，并提示用户执行迁移 SQL。
  */
 async function saveRecord(rec, revive = false) {
+  console.log('[TEMP-DEBUG] SAVE RECORD', rec);   // 探针5：saveRecord 是否收到数据
   if (!currentUser) throw new Error('未登录');
   const uid = currentUser.id;
   const existing = findRecord(rec.date);   // 改前镜像（含 modifiedAt），用于字段级 LWW，顺序不可变
@@ -504,17 +507,49 @@ async function flushPending() {
   }
 }
 
-// 同步状态显示：在线 / 离线 / 待同步 N 条 / 同步中…
+// 同步状态显示：在线 / 离线 / 待同步 N 条 / 同步中… + 最后同步时间 + 点击手动同步
 async function updateSyncStatus() {
   const el = $('sync-status');
   if (!el) return;
+
+  // 首次绑定点击 / 键盘触发手动同步（仅在 UI 层调用既有同步函数，不改动同步逻辑）
+  if (!el.dataset.bound) {
+    el.dataset.bound = '1';
+    const doRefresh = async () => {
+      if (!navigator.onLine) { updateSyncStatus(); return; }
+      setSyncing(true);
+      try { await flushPending(); } catch (_) {}
+      try { await loadRecords(); } catch (_) {}
+      setSyncing(false);
+      updateSyncStatus();
+    };
+    el.addEventListener('click', doRefresh);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doRefresh(); }
+    });
+    // 空闲时仅刷新显示（不动同步逻辑），保持「N 分钟前」新鲜
+    setInterval(() => updateSyncStatus(), 30000);
+  }
+
   let count = 0;
   try { count = (await LocalDB.getAllPending()).length; } catch (_) {}
+
+  // 最后同步时间（loadRecords 成功写入 lastSyncAt）
+  let lastSync = '';
+  try {
+    const t = await LocalDB.getMeta('lastSyncAt');
+    if (t) {
+      const mins = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
+      lastSync = mins <= 0 ? '刚刚' : mins + ' 分钟前';
+    }
+  } catch (_) {}
+
   let text, cls;
   if (!navigator.onLine) { text = '离线'; cls = 'offline'; }
   else if (isSyncing) { text = '同步中…'; cls = 'syncing'; }
   else if (count > 0) { text = '待同步 ' + count + ' 条'; cls = 'pending'; }
-  else { text = '在线'; cls = 'online'; }
+  else { text = lastSync ? ('已同步 · ' + lastSync) : '在线'; cls = 'online'; }
+
   el.textContent = text;
   el.className = 'sync-status ' + cls;
 }
@@ -556,12 +591,86 @@ function switchTab(tab) {
   $(tab + '-view').classList.add('active');
   document.querySelectorAll('.tab').forEach((t) =>
     t.classList.toggle('active', t.dataset.tab === tab));
+  // iOS 导航：今日页显示「日期切换簇」，历史/工资页显示标题（不改任何业务/同步逻辑）
+  const isToday = tab === 'today';
+  $('nav-datemode').classList.toggle('hidden', !isToday);
+  $('nav-titlemode').classList.toggle('hidden', isToday);
   $('topbar-title').textContent = TAB_TITLE[tab] || '';
+  if (isToday) updateNavDate();
   // 进入历史/工资页时主动刷新一次：历史页即时重渲染 + 拉取最新；
   // 工资页为按需计算，这里只刷新底层 records，确保点「计算」用的是最新数据。
   if (tab === 'history') { renderHistory(); loadRecords(); }
   else if (tab === 'salary') { loadRecords(); }
   else if (tab === 'today') { renderToday(); }
+}
+
+/* ---------- 8b. 顶部日期切换（iOS 风格，纯 UI 层） ---------- */
+const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function parseDate(str) { const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d); }
+function fmtDate(d) {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function shiftDate(str, delta) { const d = parseDate(str); d.setDate(d.getDate() + delta); return fmtDate(d); }
+function updateNavDate() {
+  const ds = $('t-date').value || todayStr();
+  const d = parseDate(ds);
+  const today = todayStr();
+  let main;
+  if (ds === today) main = '今天';
+  else if (ds === shiftDate(today, -1)) main = '昨天';
+  else if (ds === shiftDate(today, -2)) main = '前天';
+  else main = `${d.getMonth() + 1}月${d.getDate()}日`;
+  $('nav-date-main').textContent = main;
+  $('nav-date-sub').textContent = `${WEEK[d.getDay()]}`;
+}
+// 切换日期：仅更新 t-date 状态源 + 触发既有 change 处理（todayDirty=false + loadTodayInputs）+ 刷新导航显示
+function goToDate(dateStr, dir) {
+  $('t-date').value = dateStr;
+  $('t-date').dispatchEvent(new Event('change'));
+  updateNavDate();
+  const tv = $('today-view');
+  if (tv && dir) {
+    tv.classList.remove('anim-next', 'anim-prev');
+    void tv.offsetWidth;                             // 重启动画
+    tv.classList.add(dir > 0 ? 'anim-next' : 'anim-prev');
+  }
+}
+function prevDay() { if (!$('nav-datemode').classList.contains('hidden')) goToDate(shiftDate($('t-date').value, -1), -1); }
+function nextDay() { if (!$('nav-datemode').classList.contains('hidden')) goToDate(shiftDate($('t-date').value, 1), 1); }
+
+/* 月历弹层 */
+let calYear, calMonth;   // 当前展示的年/月（1-12）
+function openCalendar() {
+  const d = parseDate($('t-date').value || todayStr());
+  calYear = d.getFullYear(); calMonth = d.getMonth() + 1;
+  renderCalendar();
+  $('calendar-sheet').classList.remove('hidden');
+}
+function closeCalendar() { $('calendar-sheet').classList.add('hidden'); }
+function renderCalendar() {
+  const cur = $('t-date').value || todayStr();
+  $('cal-title').textContent = `${calYear}年${calMonth}月`;
+  const first = new Date(calYear, calMonth - 1, 1);
+  const startPad = (first.getDay() + 6) % 7;        // 周一为首列（纯渲染偏移，不涉及业务/同步/DB）
+  const daysInMonth = new Date(calYear, calMonth, 0).getDate();
+  const today = todayStr();
+  const dataDates = new Set((records || []).map((r) => r.date));   // 仅用于高亮，只读
+  const grid = $('cal-grid'); grid.innerHTML = '';
+  for (let i = 0; i < startPad; i++) {
+    const e = document.createElement('div'); e.className = 'cal-cell empty'; grid.appendChild(e);
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const ds = `${calYear}-${String(calMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const cell = document.createElement('div');
+    cell.className = 'cal-cell';
+    cell.textContent = day;
+    if (ds === today) cell.classList.add('today-cell');
+    if (ds === cur) cell.classList.add('selected');
+    if (dataDates.has(ds)) cell.classList.add('has-data');
+    cell.addEventListener('click', () => { goToDate(ds, null); closeCalendar(); });
+    grid.appendChild(cell);
+  }
 }
 
 /* ---------- 9. 今日页 ---------- */
@@ -593,6 +702,9 @@ function loadTodayInputs(date) {
 // 修复体验问题：删除/同步后 records 已更新，但今日输入框仅在 init / 改日期 / 编辑恰为今日时刷新，
 // 导致历史页更新而今日页残留旧值。现在由 loadRecords() 与 switchTab(today) 统一调用。
 function renderToday() {
+  // V3.0.1：dirty 守卫——今日表单有未保存输入时跳过回填，
+  // 防止 autoPull(30s) / switchTab / loadRecords 用内存 records 覆盖用户正在编辑的数据。
+  if (todayDirty) return;
   loadTodayInputs($('t-date').value);
 }
 
@@ -616,6 +728,12 @@ function updateTodaySummary() {
   $('s-assist').textContent = fmtMoney(r.assist);
   // V2.6.1：2026-08-01 起隐藏今日金额汇总中的「助播」行（仅展示层，不影响保存/同步/合并）
   $('row-s-assist').classList.toggle('hidden', !isAssistVisible(r.date));
+  // [V3.0 Phase 3A] 仅新增 UI 状态绑定：净收入卡头条(出单+发布) 与 退款金额。
+  // 不改动任何业务/保存/同步/合并逻辑，亦不影响 FIELDS / STAMP_COL / assist 数据字段。
+  const heroMoney = document.getElementById('s-net-money');
+  if (heroMoney) heroMoney.textContent = fmtMoney(out + pub);
+  const rfMoney = document.getElementById('s-refund-money');
+  if (rfMoney) rfMoney.textContent = (r.refund > 0 ? '-' : '') + fmtMoney(r.refund * CONFIG.price);
 }
 
 /**
@@ -643,6 +761,7 @@ function showReviveModal(rec) {
 
 async function handleTodaySave() {
   const rec = readTodayInputs();
+  console.log('[TEMP-DEBUG] SAVE START', rec.date, rec);   // 探针4：handleTodaySave 是否执行
   if (!rec.date) { $('t-status').textContent = '请选择日期'; return; }
   const btn = $('t-save');
   btn.disabled = true; btn.textContent = '保存中…';
@@ -656,7 +775,13 @@ async function handleTodaySave() {
       }
       revive = true;
     }
+    // V3.0.1a：快照已捕获（rec）。dirty 的清除移到 saveRecord 正常返回之后——
+    // 若 saveRecord 抛异常（未登录/意外异常），不会执行到这里，todayDirty 保持 true，
+    // 未保存的 DOM 输入继续受 renderToday 守卫保护，与下方 catch 的「保存失败」提示一致。
+    // 说明：saveRecord 内部成功路径会 await loadRecords()→renderToday()，此刻 dirty 仍为 true
+    // 故其回填被守卫跳过（DOM 已等于刚保存值，无副作用）；本函数末尾再清 dirty，恢复正常回填。
     await saveRecord(rec, revive);
+    todayDirty = false;   // 仅在保存链路正常返回后清除
     $('t-status').textContent = revive ? '✅ 已恢复并保存，已同步到云端' : '✅ 已保存并同步到云端';
   } catch (err) {
     $('t-status').textContent = '保存失败：' + (err.message || err);
@@ -675,25 +800,60 @@ function renderHistory() {
     return;
   }
   empty.classList.add('hidden');
-  list.innerHTML = records.map((r) => {
+
+  // 按日期降序，便于「近月 / 近日」在前（仅重排，不改任何金额/同步逻辑）
+  const sorted = [...records].sort((a, b) => b.date.localeCompare(a.date));
+  const groups = {};
+  for (const r of sorted) {
+    const ym = r.date.slice(0, 7);              // YYYY-MM
+    (groups[ym] = groups[ym] || []).push(r);
+  }
+  const ymKeys = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+
+  const monthLabel = (ym) => {
+    const [y, m] = ym.split('-');
+    return `${y}年${parseInt(m, 10)}月`;
+  };
+  const dayLabel = (date) => {
+    return `${parseInt(date.slice(5, 7), 10)}月${parseInt(date.slice(8, 10), 10)}日`;
+  };
+  const rowHTML = (r) => {
     const net = r.xhs + r.dy - r.refund;
     const total = (net * CONFIG.price) + r.assist +
       (r.note_qty * CONFIG.notePrice + r.material_qty * CONFIG.materialPrice + r.video_qty * CONFIG.videoPrice);
     return `
-      <div class="hrow" data-date="${r.date}">
-        <div class="hrow-main">
-          <div class="hrow-date">${r.date}</div>
-          <div class="hrow-tags">
-            <span>小${r.xhs}</span><span>抖${r.dy}</span>
-            <span class="neg">退${r.refund}</span>
-            <span>图${r.note_qty}</span><span>素${r.material_qty}</span><span>视${r.video_qty}</span>
-            ${(r.assist !== 0 && isAssistVisible(r.date)) ? `<span class="assist">助¥${r.assist}</span>` : ''}
+        <div class="hrow" data-date="${r.date}">
+          <div class="hrow-main">
+            <div class="hrow-date">${dayLabel(r.date)}</div>
+            <div class="hrow-tags">
+              <span>小${r.xhs}</span><span>抖${r.dy}</span>
+              <span class="neg">退${r.refund}</span>
+              <span>图${r.note_qty}</span><span>素${r.material_qty}</span><span>视${r.video_qty}</span>
+              ${(r.assist !== 0 && isAssistVisible(r.date)) ? `<span class="assist">助¥${r.assist}</span>` : ''}
+            </div>
           </div>
-        </div>
-        <div class="hrow-right">
-          <div class="hrow-total">${fmtMoney(total)}</div>
-          <div class="hrow-edit">编辑 ›</div>
-        </div>
+          <div class="hrow-right">
+            <div class="hrow-total">${fmtMoney(total)}</div>
+            <div class="hrow-edit">编辑 ›</div>
+          </div>
+        </div>`;
+  };
+
+  list.innerHTML = ymKeys.map((ym) => {
+    const rs = groups[ym];
+    let sum = 0;
+    const rows = rs.map((r) => {
+      const net = r.xhs + r.dy - r.refund;
+      const total = (net * CONFIG.price) + r.assist +
+        (r.note_qty * CONFIG.notePrice + r.material_qty * CONFIG.materialPrice + r.video_qty * CONFIG.videoPrice);
+      sum += total;
+      return rowHTML(r);
+    }).join('');
+    return `
+      <div class="hgroup">
+        <div class="hgroup-head">${monthLabel(ym)}</div>
+        <div class="hgroup-body">${rows}</div>
+        <div class="hgroup-foot">本月合计 ${fmtMoney(sum)} · ${rs.length} 笔</div>
       </div>`;
   }).join('');
 
@@ -843,10 +1003,30 @@ function bindEvents() {
   document.querySelectorAll('.tab').forEach((t) =>
     t.addEventListener('click', () => switchTab(t.dataset.tab)));
 
-  $('t-date').addEventListener('change', () => loadTodayInputs($('t-date').value));
+  // V3.0.1：显式切换日期 = 用户主动放弃当前未保存输入，先清 dirty 再回填
+  $('t-date').addEventListener('change', () => { todayDirty = false; loadTodayInputs($('t-date').value); });
   ['t-xhs', 't-dy', 't-refund', 't-assist', 't-note', 't-material', 't-video']
     .forEach((id) => $(id).addEventListener('input', updateTodaySummary));
+  // V3.0.1：手动输入任一字段即标记 dirty（独立监听器，不改动上面的汇总绑定；
+  // 程序化 .value= 赋值不触发 input 事件，因此 loadTodayInputs 回填不会误置位）
+  ['t-xhs', 't-dy', 't-refund', 't-assist', 't-note', 't-material', 't-video']
+    .forEach((id) => $(id).addEventListener('input', () => {
+      console.log('[TEMP-DEBUG] INPUT', id, $(id).value);   // 探针1：input 是否触发
+      todayDirty = true;
+      console.log('[TEMP-DEBUG] DIRTY', todayDirty);        // 探针2：dirty 是否置 true
+    }));
   $('t-save').addEventListener('click', handleTodaySave);
+
+  // V3.0.1：macOS Command+S（兼容 Ctrl+S）→ 调用现有保存函数，不新增任何保存逻辑。
+  // 编辑弹层打开时保存弹层；否则今日页激活时保存今日。saveRecord 本身未改动。
+  document.addEventListener('keydown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || (e.key !== 's' && e.key !== 'S')) return;
+    console.log('[TEMP-DEBUG] CMD+S');   // 探针3：⌘S/Ctrl+S 是否被捕获
+    e.preventDefault();   // 拦截浏览器"存储网页"
+    if (!currentUser || $('app').classList.contains('hidden')) return;
+    if (!$('edit-sheet').classList.contains('hidden')) { handleEditSave(); return; }
+    if ($('today-view').classList.contains('active')) handleTodaySave();
+  });
 
   $('sal-calc').addEventListener('click', handleSalaryCalc);
   document.querySelectorAll('.quick-range .chip').forEach((c) =>
