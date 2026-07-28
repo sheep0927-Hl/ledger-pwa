@@ -1003,6 +1003,13 @@ function bindEvents() {
   document.querySelectorAll('.tab').forEach((t) =>
     t.addEventListener('click', () => switchTab(t.dataset.tab)));
 
+  // 顶部日期切换簇（iOS 风）：左右箭头切天，点击日期展开月历。
+  // prevDay/nextDay/openCalendar 已在上方定义，此处仅补 UI 事件绑定，不动任何业务/同步逻辑。
+  const navPrev = $('nav-prev'), navNext = $('nav-next'), navDate = $('nav-date');
+  if (navPrev) navPrev.addEventListener('click', prevDay);
+  if (navNext) navNext.addEventListener('click', nextDay);
+  if (navDate) navDate.addEventListener('click', openCalendar);
+
   // V3.0.1：显式切换日期 = 用户主动放弃当前未保存输入，先清 dirty 再回填
   $('t-date').addEventListener('change', () => { todayDirty = false; loadTodayInputs($('t-date').value); });
   ['t-xhs', 't-dy', 't-refund', 't-assist', 't-note', 't-material', 't-video']

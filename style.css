@@ -35,6 +35,7 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body {
   margin: 0; padding: 0;
+  overflow-x: hidden;   /* 防止任何元素横向溢出导致右侧空白（不影响 sticky 顶栏） */
   font-family: var(--font);
   background: var(--bg); color: var(--text);
   font-size: 16px; line-height: 1.4;
@@ -268,6 +269,10 @@ input, button { font-family: inherit; }
 .sync-status.offline { color: #8E8E93; background: rgba(142,142,147,.12); }
 .sync-status.pending { color: #FF9F0A; background: rgba(255,159,10,.12); }
 .sync-status.syncing { color: #007AFF; background: rgba(0,122,255,.12); }
+
+/* UI V1 上线后：顶部同步状态（如「已同步 · 刚刚」）改为隐藏，避免多余文字与横向溢出。
+   仅隐藏展示层，同步逻辑（flushPending / loadRecords / updateSyncStatus）保持不变。 */
+#sync-status { display: none !important; }
 
 /* 右侧退出 */
 .topbar-logout {
