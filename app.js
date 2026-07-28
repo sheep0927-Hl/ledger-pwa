@@ -998,10 +998,44 @@ function handleSalaryCalc() {
     </div>`;
 }
 
+/* ---------- 账户菜单（iOS 风格） ---------- */
+function toggleAccountMenu() {
+  const menu = $('account-menu');
+  if (!menu) return;
+  menu.classList.toggle('hidden');
+}
+function closeAccountMenu() {
+  const menu = $('account-menu');
+  if (menu) menu.classList.add('hidden');
+}
+function handleAccountAction(action) {
+  closeAccountMenu();
+  if (action === 'logout') {
+    handleLogout();
+  }
+  // 账号管理 / 设置为预留入口，当前无操作
+}
+
 /* ---------- 13. 事件绑定 ---------- */
 function bindEvents() {
   $('login-form').addEventListener('submit', handleLogin);
-  $('logout-btn').addEventListener('click', handleLogout);
+
+  // 账户菜单入口：点击按钮切换，点击菜单项执行对应动作，点击外部关闭
+  const accountBtn = $('account-btn');
+  const accountMenu = $('account-menu');
+  if (accountBtn) {
+    accountBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleAccountMenu();
+    });
+  }
+  if (accountMenu) {
+    accountMenu.addEventListener('click', (e) => e.stopPropagation());
+    accountMenu.querySelectorAll('.account-menu-item').forEach((item) => {
+      item.addEventListener('click', () => handleAccountAction(item.dataset.action));
+    });
+  }
+  document.addEventListener('click', closeAccountMenu);
 
   document.querySelectorAll('.tab').forEach((t) =>
     t.addEventListener('click', () => switchTab(t.dataset.tab)));
