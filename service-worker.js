@@ -1,5 +1,5 @@
 /* 总账 Ledger PWA — Service Worker（离线应用壳） */
-const CACHE = 'ledger-pwa-v10';
+const CACHE = 'ledger-pwa-v11';
 const ASSETS = [
   './',
   './index.html',

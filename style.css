@@ -356,7 +356,8 @@ input, button { font-family: inherit; }
 .pill.pub { background: rgba(0,122,255,.12); color: #007AFF; }
 .pill.ref { background: rgba(255,159,10,.14); color: #FF9F0A; }
 .pill.ass { background: rgba(52,199,89,.14); color: #1E8E3E; }
-.net-sub { font-size: 12.5px; color: var(--text-tert); font-weight: 400; margin-top: 5px; }
+/* 隐藏「今日 X 笔」一行：仅 UI 隐藏，net 计算与 s-net 赋值逻辑保留 */
+.net-sub { display: none; }
 .net-sub b { color: var(--text-tert); font-variant-numeric: tabular-nums; font-weight: 400; }
 
 /* ============================================================
