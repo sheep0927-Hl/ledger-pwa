@@ -596,3 +596,13 @@ input, button { font-family: inherit; }
 .modal-actions { display: flex; gap: 12px; }
 .modal-actions .btn-primary { flex: 1; width: auto; height: 44px; font-size: 16px; }
 .modal-actions .btn-ghost { flex: 0 0 auto; }
+
+/* ---------- P1-1 收入记录（复用既有 .hrow / .sheet / .field，仅增量） ---------- */
+#income-add { margin-top: 16px; }
+.type-badge { display: inline-block; font-size: 12px; font-weight: 600; color: #1E8E3E; background: rgba(52,199,89,.14); padding: 1px 7px; border-radius: 7px; margin-right: 6px; }
+.seg { display: flex; gap: 8px; }
+.seg-item { flex: 1; padding: 10px; border: 1px solid rgba(118,118,128,.22); border-radius: 10px; background: var(--card); color: var(--text-sub); font-size: 14px; font-weight: 600; }
+.seg-item.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.toggle-row { display: flex; align-items: center; justify-content: space-between; }
+.toggle-row label { margin-bottom: 0; }
+.hrow-total { font-variant-numeric: tabular-nums; }

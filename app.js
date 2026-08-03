@@ -585,7 +585,7 @@ function computeSalary(recs) {
 }
 
 /* ---------- 8. 视图切换 ---------- */
-const TAB_TITLE = { today: '今日', history: '历史', salary: '工资' };
+const TAB_TITLE = { today: '今日', history: '历史', income: '收入记录', salary: '工资' };
 function switchTab(tab) {
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
   $(tab + '-view').classList.add('active');
@@ -602,6 +602,7 @@ function switchTab(tab) {
   if (tab === 'history') { renderHistory(); loadRecords(); }
   else if (tab === 'salary') { loadRecords(); }
   else if (tab === 'today') { renderToday(); }
+  else if (tab === 'income') { loadIncomeRecords(); renderIncomeRecords(); }
 }
 
 /* ---------- 8b. 顶部日期切换（iOS 风格，纯 UI 层） ---------- */
@@ -1016,6 +1017,166 @@ function handleAccountAction(action) {
   // 账号管理 / 设置为预留入口，当前无操作
 }
 
+/* ---------- 12c. 收入记录（P1-1 · 独立命名空间，仅复用 income_records 现有字段） ---------- */
+// 约束：不修改 Supabase schema / RLS / Realtime / 同步逻辑；仅新增对现有 income_records 表的读写。
+// 写入遵循既有约定：id=客户端 crypto.randomUUID()、date=yyyy-MM-dd、modified_at=写时更新、删除=软删(deleted_at)。
+let incomeRecords = [];
+let editingIncomeId = null;
+
+// 类型显示名（存储值 assist / other）
+function incomeTypeLabel(type) {
+  if (type === 'assist') return '助播';
+  if (type === 'other') return '其他';
+  return type || '其他';
+}
+
+// 简单 HTML 转义，防止备注 XSS
+function incomeEscapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// 读取：仅复用现有 income_records 表 + 字段 + 现有 RLS，不改任何 schema / 同步
+async function loadIncomeRecords() {
+  const uid = currentUser ? currentUser.id : null;
+  if (!uid) { incomeRecords = []; return; }
+  try {
+    const { data, error } = await sb
+      .from('income_records')
+      .select('*')
+      .eq('user_id', uid)
+      .is('deleted_at', null)
+      .order('date', { ascending: false });
+    if (error) {
+      showBanner('收入记录读取失败：' + (error.message || ''), 'error');
+      incomeRecords = [];
+    } else {
+      incomeRecords = data || [];
+    }
+  } catch (_) {
+    incomeRecords = [];
+  }
+}
+
+function renderIncomeRecords() {
+  const list = $('income-list');
+  const empty = $('income-empty');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!incomeRecords.length) {
+    if (empty) empty.classList.remove('hidden');
+    return;
+  }
+  if (empty) empty.classList.add('hidden');
+  for (const r of incomeRecords) {
+    const row = document.createElement('div');
+    row.className = 'hrow';
+    row.dataset.id = r.id;
+    const note = r.note ? incomeEscapeHtml(r.note) : '';
+    const counts = r.counts_in_salary ? '<span class="assist">计入工资</span>' : '';
+    row.innerHTML =
+      '<div class="hrow-main">' +
+        '<div class="hrow-date"><span class="type-badge">' + incomeTypeLabel(r.type) + '</span>' + (r.date || '') + '</div>' +
+        '<div class="hrow-tags">' +
+          (note ? '<span>' + note + '</span>' : '') +
+          counts +
+        '</div>' +
+      '</div>' +
+      '<div class="hrow-right">' +
+        '<div class="hrow-total">¥' + num(r.amount) + '</div>' +
+        '<div class="hrow-edit">编辑 ›</div>' +
+      '</div>';
+    list.appendChild(row);
+  }
+}
+
+// 打开编辑弹层：recOrId 为记录 id（编辑）或 null（新增）
+function openIncomeEditor(recOrId) {
+  editingIncomeId = null;
+  const isEdit = typeof recOrId === 'string';
+  const rec = isEdit ? incomeRecords.find((r) => r.id === recOrId) : null;
+  if (isEdit && rec) editingIncomeId = rec.id;
+
+  const type = rec ? rec.type : 'assist';
+  document.querySelectorAll('#income-type .seg-item').forEach((b) =>
+    b.classList.toggle('active', b.dataset.type === type));
+
+  $('income-date').value = rec ? (rec.date || todayStr()) : todayStr();
+  $('income-amount').value = rec ? num(rec.amount) : '';
+  $('income-note').value = rec ? (rec.note || '') : '';
+  $('income-counts').checked = rec ? (rec.counts_in_salary !== false) : true;
+  $('income-sheet-title').textContent = rec ? '编辑收入' : '添加收入';
+  $('income-delete').classList.toggle('hidden', !rec);
+  $('income-status').textContent = '';
+  $('income-sheet').classList.remove('hidden');
+}
+
+function closeIncomeEditor() {
+  $('income-sheet').classList.add('hidden');
+  editingIncomeId = null;
+}
+
+async function handleIncomeSave() {
+  const uid = currentUser ? currentUser.id : null;
+  if (!uid) { showBanner('未登录，无法保存', 'error'); return; }
+  const activeTypeBtn = document.querySelector('#income-type .seg-item.active');
+  const type = activeTypeBtn ? activeTypeBtn.dataset.type : 'assist';
+  const date = $('income-date').value || todayStr();
+  const amount = num($('income-amount').value);
+  const note = ($('income-note').value || '').trim();
+  const counts = $('income-counts').checked;
+
+  const now = new Date().toISOString();
+  const payload = {
+    user_id: uid,
+    type: type,
+    date: date,
+    amount: amount,
+    note: note,
+    counts_in_salary: counts,
+    modified_at: now
+  };
+  if (editingIncomeId) {
+    payload.id = editingIncomeId;   // 更新（LWW：id + modified_at）
+  } else {
+    // 客户端生成 UUID（与 macOS IncomeStore 一致），保证与现有同步层 LWW 合并兼容
+    payload.id = (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : ('inc-' + Date.now() + '-' + Math.random().toString(16).slice(2));
+  }
+
+  $('income-status').textContent = '保存中…';
+  const { error } = await sb.from('income_records').upsert(payload, { onConflict: 'id' });
+  if (error) {
+    $('income-status').textContent = '';
+    showBanner('收入保存失败：' + (error.message || ''), 'error');
+    return;
+  }
+  await loadIncomeRecords();
+  renderIncomeRecords();
+  closeIncomeEditor();
+}
+
+async function handleIncomeDelete() {
+  const uid = currentUser ? currentUser.id : null;
+  if (!uid || !editingIncomeId) return;
+  if (!window.confirm('确定删除这条收入记录吗？（软删除，可恢复）')) return;
+  const now = new Date().toISOString();
+  const { error } = await sb
+    .from('income_records')
+    .update({ deleted_at: now, modified_at: now })
+    .eq('id', editingIncomeId)
+    .eq('user_id', uid);
+  if (error) {
+    showBanner('收入删除失败：' + (error.message || ''), 'error');
+    return;
+  }
+  await loadIncomeRecords();
+  renderIncomeRecords();
+  closeIncomeEditor();
+}
+
 /* ---------- 13. 事件绑定 ---------- */
 function bindEvents() {
   $('login-form').addEventListener('submit', handleLogin);
@@ -1095,6 +1256,23 @@ function bindEvents() {
   $('e-save').addEventListener('click', handleEditSave);
   $('e-delete').addEventListener('click', handleEditDelete);
   document.querySelector('#edit-sheet .sheet-backdrop').addEventListener('click', closeEdit);
+
+  // P1-1 收入记录：独立命名空间，不复用历史 edit-sheet，不改任何同步逻辑
+  $('income-add').addEventListener('click', () => openIncomeEditor(null));
+  $('income-save').addEventListener('click', handleIncomeSave);
+  $('income-cancel').addEventListener('click', closeIncomeEditor);
+  $('income-delete').addEventListener('click', handleIncomeDelete);
+  $('income-backdrop').addEventListener('click', closeIncomeEditor);
+  document.querySelectorAll('#income-type .seg-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#income-type .seg-item').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  $('income-list').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-id]');
+    if (row) openIncomeEditor(row.dataset.id);
+  });
 }
 
 /* ---------- 14. 启动 ---------- */

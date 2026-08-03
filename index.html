@@ -182,6 +182,14 @@
         <div id="history-empty" class="empty hidden">暂无记录</div>
       </section>
 
+      <!-- ---------- 收入记录（P1-1，独立命名空间） ---------- -->
+      <section id="income-view" class="view">
+        <div class="section-title">收入记录</div>
+        <div id="income-list" class="history-list"></div>
+        <div id="income-empty" class="empty hidden">还没有收入记录</div>
+        <button id="income-add" class="btn-primary">添加收入</button>
+      </section>
+
       <!-- ---------- 工资 ---------- -->
       <section id="salary-view" class="view">
         <div class="card">
@@ -209,6 +217,9 @@
       </button>
       <button class="tab" data-tab="history">
         <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span>历史</span>
+      </button>
+      <button class="tab" data-tab="income">
+        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><span>收入</span>
       </button>
       <button class="tab" data-tab="salary">
         <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Z"/><path d="M16 12h.01"/></svg></span><span>工资</span>
@@ -240,6 +251,36 @@
         <button id="e-save" class="btn-primary">保存</button>
       </div>
       <div id="e-status" class="hint"></div>
+    </div>
+  </div>
+
+  <!-- 收入记录编辑弹层（P1-1：独立命名空间，不复用历史 edit-sheet，不触碰任何同步逻辑） -->
+  <div id="income-sheet" class="sheet hidden">
+    <div class="sheet-backdrop" id="income-backdrop"></div>
+    <div class="sheet-panel">
+      <div class="sheet-title" id="income-sheet-title">添加收入</div>
+      <div class="field">
+        <label>类型</label>
+        <div class="seg" id="income-type">
+          <button type="button" class="seg-item active" data-type="assist">助播</button>
+          <button type="button" class="seg-item" data-type="other">其他</button>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>日期</label><input id="income-date" type="date" /></div>
+        <div class="field"><label>金额（元）</label><input id="income-amount" type="number" inputmode="numeric" min="0" placeholder="0" /></div>
+      </div>
+      <div class="field"><label>备注</label><input id="income-note" type="text" placeholder="可选" /></div>
+      <div class="field toggle-row">
+        <label for="income-counts">计入工资</label>
+        <input id="income-counts" type="checkbox" checked />
+      </div>
+      <div id="income-status" class="hint"></div>
+      <div class="sheet-actions">
+        <button id="income-delete" class="btn-danger hidden">删除</button>
+        <button id="income-cancel" class="btn-ghost">取消</button>
+        <button id="income-save" class="btn-primary">保存</button>
+      </div>
     </div>
   </div>
 
