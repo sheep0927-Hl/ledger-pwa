@@ -296,9 +296,9 @@ input, button { font-family: inherit; }
 .sync-status.pending { color: #FF9F0A; background: rgba(255,159,10,.12); }
 .sync-status.syncing { color: #007AFF; background: rgba(0,122,255,.12); }
 
-/* UI V1 上线后：顶部同步状态（如「已同步 · 刚刚」）改为隐藏，避免多余文字与横向溢出。
-   仅隐藏展示层，同步逻辑（flushPending / loadRecords / updateSyncStatus）保持不变。 */
-#sync-status { display: none !important; }
+/* 同步状态胶囊（#sync-status）保持可见：推送失败时必须让用户看到「待同步 N 条」，杜绝静默失败。
+   布局上为绝对定位（top-left 胶囊），与日期导航簇错开；如仍有横向挤压可后续微调。 */
+#sync-status { display: inline-flex; }
 
 .content {
   padding: 12px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 24px);

@@ -303,6 +303,47 @@ function normalizeRecord(r) {
 
 function findRecord(date) { return records.find((r) => r.date === date); }
 
+/* ---------- 推送诊断日志（[PWA_PUSH]）+ 会话状态辅助 ---------- */
+function sessState() {
+  if (!currentUser) return 'none';
+  try {
+    const raw = localStorage.getItem('ledger-pwa-auth');
+    if (raw) {
+      const p = JSON.parse(raw);
+      const exp = p && (p.expires_at || (p.session && p.session.expires_at));
+      if (exp && Date.now() / 1000 > exp) return 'expired';
+    }
+  } catch (_) {}
+  return 'authed';
+}
+function logPush({ date, assist, payload, session, result, error }) {
+  const p = (typeof payload === 'string') ? payload : JSON.stringify(payload);
+  console.log(
+    `[PWA_PUSH]\n` +
+    `date=${date}\n` +
+    `assist=${assist ?? '-'}\n` +
+    `payload=${p}\n` +
+    `session=${session}\n` +
+    `result=${result}\n` +
+    `error=${error || '-'}`
+  );
+}
+// 重放/补推前确认并刷新会话，避免 token 失效 → 持续 401 → outbox 永卡
+async function ensureSession() {
+  let s = null;
+  try { const { data } = await sb.auth.getSession(); s = data && data.session; } catch (_) {}
+  if (!s || (s.expires_at && Date.now() / 1000 > s.expires_at)) {
+    const backup = loadSessionBackup();
+    if (backup && backup.refresh_token) {
+      try {
+        const r = await sb.auth.setSession({ access_token: backup.access_token, refresh_token: backup.refresh_token });
+        s = r.data && r.data.session;
+      } catch (_) { s = null; }
+    }
+  }
+  return !!s;
+}
+
 /**
  * 扫描云端原始行，刷新"已删除日期"集合（V2.3-E 显式恢复检测用）。
  * - 行 deleted_at 非空 → 记为已删除；
@@ -342,6 +383,7 @@ async function upsertWithFallbacks(payload) {
     showBanner('云端尚未添加 deleted_at 列，删除将退化为物理删除。请在 Supabase SQL Editor 运行 06_add_deleted_at.sql。', 'warn');
     ({ error } = await sb.from('daily_records').upsert(payload, { onConflict: 'user_id,date' }));
   }
+  logPush({ date: payload.date, assist: payload.assist, payload: payload, session: sessState(), result: error ? 'failed' : 'success', error: (error && error.message) || '-' });
   return error || null;
 }
 
@@ -362,7 +404,7 @@ async function cloudDelete(date, deletedAt) {
  * 若云端缺少 material_qty 或 *_modified_at 列，自动去掉对应字段重试，并提示用户执行迁移 SQL。
  */
 async function saveRecord(rec, revive = false) {
-  console.log('[TEMP-DEBUG] SAVE RECORD', rec);   // 探针5：saveRecord 是否收到数据
+  logPush({ date: rec.date, assist: rec.assist, payload: 'save-start', session: sessState(), result: 'start', error: '-' });
   if (!currentUser) throw new Error('未登录');
   const uid = currentUser.id;
   const existing = findRecord(rec.date);   // 改前镜像（含 modifiedAt），用于字段级 LWW，顺序不可变
@@ -422,15 +464,18 @@ async function saveRecord(rec, revive = false) {
     try {
       await LocalDB.putPending({ date: rec.date, action: 'save', payload: payload, createdAt: nowISO() });
     } catch (_) { /* IDB 不可用则仅保留内存提示 */ }
+    logPush({ date: rec.date, assist: payload.assist ?? rec.assist, payload: 'outbox', session: sessState(), result: 'failed', error: (error && error.message) || String(error) });
     showBanner('已保存到本地（离线或同步失败），联网后将自动同步', 'warn');
     renderHistory();
     updateSyncStatus();
-    return;
+    return 'pending';
   }
   // 成功：清除该日期可能残留的待同步项
   try { await LocalDB.deletePendingByDate(rec.date); } catch (_) {}
+  logPush({ date: rec.date, assist: payload.assist ?? rec.assist, payload: 'synced', session: sessState(), result: 'success', error: '-' });
   await loadRecords();
   updateSyncStatus();
+  return 'synced';
 }
 
 async function deleteRecord(date) {
@@ -491,11 +536,13 @@ async function flushPending() {
   isFlushing = true;
   setSyncing(true);
   try {
+    await ensureSession();   // 补推前确认/刷新会话，避免 token 失效导致 401 卡死
     const pending = await LocalDB.getAllPending();
     if (!pending.length) return;
     for (const entry of pending) {
       let err = null;
       try { err = await replayPending(entry); } catch (e) { err = e; }
+      logPush({ date: entry.payload && entry.payload.date, assist: entry.payload && entry.payload.assist, payload: 'replay', session: sessState(), result: err ? 'failed' : 'success', error: (err && err.message) || (err ? String(err) : '-') });
       if (err) break;                       // 失败停止，保留队列等下次
       try { await LocalDB.deletePending(entry.id); } catch (_) {}
     }
@@ -765,7 +812,6 @@ function showReviveModal(rec) {
 
 async function handleTodaySave() {
   const rec = readTodayInputs();
-  console.log('[TEMP-DEBUG] SAVE START', rec.date, rec);   // 探针4：handleTodaySave 是否执行
   if (!rec.date) { $('t-status').textContent = '请选择日期'; return; }
   const btn = $('t-save');
   btn.disabled = true; btn.textContent = '保存中…';
@@ -784,11 +830,21 @@ async function handleTodaySave() {
     // 未保存的 DOM 输入继续受 renderToday 守卫保护，与下方 catch 的「保存失败」提示一致。
     // 说明：saveRecord 内部成功路径会 await loadRecords()→renderToday()，此刻 dirty 仍为 true
     // 故其回填被守卫跳过（DOM 已等于刚保存值，无副作用）；本函数末尾再清 dirty，恢复正常回填。
-    await saveRecord(rec, revive);
+    const status = await saveRecord(rec, revive);
     todayDirty = false;   // 仅在保存链路正常返回后清除
-    $('t-status').textContent = revive ? '✅ 已恢复并保存，已同步到云端' : '✅ 已保存并同步到云端';
+    if (revive) {
+      $('t-status').textContent = (status === 'synced')
+        ? '✅ 已恢复并保存，已同步到云端'
+        : '✅ 已恢复并保存，等待同步';
+    } else {
+      $('t-status').textContent = (status === 'synced')
+        ? '✅ 已保存并同步到云端'
+        : '⏳ 已保存，等待同步';
+    }
   } catch (err) {
-    $('t-status').textContent = '保存失败：' + (err.message || err);
+    $('t-status').textContent = (err && err.message === '未登录')
+      ? '同步失败，请重新登录'
+      : '保存失败：' + (err.message || err);
   } finally {
     btn.disabled = false; btn.textContent = '保存记录';
   }
@@ -910,12 +966,17 @@ async function handleEditSave() {
       }
       revive = true;
     }
-    await saveRecord(rec, revive);
+    const status = await saveRecord(rec, revive);
+    $('e-status').textContent = (status === 'synced')
+      ? '✅ 已保存并同步到云端'
+      : '⏳ 已保存，等待同步';
     closeEdit();
     // 若编辑的是今日，刷新今日页输入
     if (rec.date === $('t-date').value) loadTodayInputs(rec.date);
   } catch (err) {
-    $('e-status').textContent = '保存失败：' + (err.message || err);
+    $('e-status').textContent = (err && err.message === '未登录')
+      ? '同步失败，请重新登录'
+      : '保存失败：' + (err.message || err);
   } finally {
     btn.disabled = false; btn.textContent = '保存';
   }
@@ -1285,6 +1346,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   updateSyncStatus();
   // 注册 Service Worker（PWA 离线壳）
   if ('serviceWorker' in navigator) {
-    try { await navigator.serviceWorker.register('service-worker.js'); } catch (_) {}
+    try {
+      await navigator.serviceWorker.register('service-worker.js');
+      // 新 SW 接管后立即重载，确保拿到最新 app.js（避免长期使用旧缓存）
+      navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+    } catch (_) {}
   }
 });
