@@ -45,8 +45,16 @@ function isAssistVisible(dateStr) {
   return dateStr < ASSIST_HIDE_FROM;   // 2026-07-31 及以前显示；2026-08-01 起隐藏
 }
 
-/* ---------- 2. 工资计算参数（镜像 macOS Store 默认值） ----------
- * 若 macOS 端修改了单价/底薪规则，请同步修改此处常量。 */
+/* ---------- 2. 工资计算参数（共享配置：Supabase public.profiles） ----------
+ * 真值来源：Supabase public.profiles 的 7 个列，由 macOS 端【唯一写入】
+ *          （用户在 Mac「默认设置」里改 → 防抖写入 profiles）。
+ * 加载优先级（见 initPriceConfig / refreshPriceConfig）：
+ *   ① 本地缓存（IndexedDB meta.price_config）—— 先读，保证首屏即上次成功配置，离线也可用
+ *   ② Supabase profiles                       —— 再拉，成功则覆盖 CONFIG 并刷新缓存
+ *   ③ 下面这个 CONFIG 对象                     —— 仅当「本地无缓存 且 云端从未成功拉到」时的引导默认值
+ * 铁律：网络失败【绝不】把价格回落到这里的硬编码值；失败时继续沿用上一次成功配置
+ *      （有缓存用缓存，无缓存保持当前内存中的值）。只有「完全没有任何配置」才用本对象。
+ * 调用点无需改动：仍是 CONFIG.price / CONFIG.notePrice / ...（对象属性可变，见 applyPriceConfig）。 */
 const CONFIG = {
   price: 4,            // 出单单价（xhs / dy / refund 共用）
   notePrice: 4,        // 图文单价
@@ -55,6 +63,98 @@ const CONFIG = {
   salaryThreshold: 20000, // 底薪达标线
   salaryHigh: 2000,    // 达标底薪（收入 > 达标线）
   salaryLow: 3000      // 未达标底薪
+};
+
+/* 共享配置：字段名 ↔ Supabase profiles 列名 映射
+ * （必须与 macOS 端 Sources/PriceConfigService.swift 的 CloudPriceConfig.CodingKeys 一致） */
+const PRICE_CONFIG_COLUMNS = {
+  price: 'price',
+  notePrice: 'note_price',
+  materialPrice: 'material_price',
+  videoPrice: 'video_price',
+  salaryThreshold: 'salary_threshold',
+  salaryHigh: 'salary_high',
+  salaryLow: 'salary_low'
+};
+const PRICE_CONFIG_FIELDS = Object.keys(PRICE_CONFIG_COLUMNS);   // 7 个字段
+const PRICE_CONFIG_CACHE_KEY = 'price_config';                   // IndexedDB meta 键名
+const PRICE_CONFIG_SELECT = PRICE_CONFIG_FIELDS.map(function (k) { return PRICE_CONFIG_COLUMNS[k]; }).join(',');
+
+/* 当前配置来源：'default'（引导默认）| 'cache'（本地缓存）| 'cloud'（云端 profiles）。
+ * 仅供诊断 / 自检展示，不参与任何计算。 */
+let priceConfigSource = 'default';
+
+/* ---------- 2b. 共享配置加载（缓存优先 → 云端覆盖；失败绝不回落硬编码） ---------- */
+
+/**
+ * 把 7 个参数写入 CONFIG。
+ * 只接受「7 项齐全且均为正整数」的输入；任何一项缺失 / 非法都整组拒绝，
+ * 避免出现半套配置（例如只有单价没有底薪）。返回是否应用成功。
+ */
+function applyPriceConfig(obj) {
+  if (!obj) return false;
+  const next = {};
+  for (let i = 0; i < PRICE_CONFIG_FIELDS.length; i++) {
+    const k = PRICE_CONFIG_FIELDS[i];
+    const v = Number(obj[k]);
+    if (!Number.isFinite(v) || !Number.isInteger(v) || v <= 0) return false;
+    next[k] = v;
+  }
+  Object.assign(CONFIG, next);
+  return true;
+}
+
+/**
+ * 从 Supabase profiles 拉取共享配置。
+ * 成功且 7 项齐全 → 应用到 CONFIG + 写本地缓存 + source='cloud'，返回 true；
+ * 失败 / 云端尚未配置（无行，或存在 NULL 列）→ 【不改动 CONFIG】，返回 false
+ * （调用方继续沿用本地缓存或当前内存值，绝不回落硬编码旧价）。
+ */
+async function refreshPriceConfig() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  const uid = currentUser ? currentUser.id : null;
+  if (!uid) return false;
+  try {
+    const { data, error } = await sb
+      .from('profiles')
+      .select(PRICE_CONFIG_SELECT)
+      .eq('id', uid)
+      .limit(1);
+    if (error || !data || !data.length) return false;
+    const row = data[0] || {};
+    const mapped = {};
+    for (let i = 0; i < PRICE_CONFIG_FIELDS.length; i++) {
+      const k = PRICE_CONFIG_FIELDS[i];
+      mapped[k] = row[PRICE_CONFIG_COLUMNS[k]];
+    }
+    if (!applyPriceConfig(mapped)) return false;   // 存在 NULL → 视为「云端尚未配置」
+    priceConfigSource = 'cloud';
+    try { await LocalDB.setMeta(PRICE_CONFIG_CACHE_KEY, Object.assign({}, CONFIG)); } catch (_) {}
+    console.log('[PRICE_CONFIG] 已从 profiles 应用: ' + JSON.stringify(CONFIG));
+    return true;
+  } catch (e) {
+    console.warn('[PRICE_CONFIG] 拉取失败，沿用上一次成功配置: ' + (e && e.message));
+    return false;
+  }
+}
+
+/**
+ * 启动（登录成功）时调用：
+ *   ① 先读本地缓存 —— 保证首屏即上次成功配置，且离线可用；
+ *   ② 再拉云端覆盖 —— 让「Mac 改价」无需重新部署 PWA 即可生效。
+ * 两者都拿不到时才保持 CONFIG 的引导默认值（唯一的「完全没有任何配置」情形）。
+ */
+async function initPriceConfig() {
+  let cache = null;
+  try { cache = await LocalDB.getMeta(PRICE_CONFIG_CACHE_KEY); } catch (_) { cache = null; }
+  if (applyPriceConfig(cache)) priceConfigSource = 'cache';
+  await refreshPriceConfig();
+  console.log('[PRICE_CONFIG] source=' + priceConfigSource + ' ' + JSON.stringify(CONFIG));
+}
+
+/* 诊断入口（只读，供排查与自动化验证使用；不参与业务） */
+window.__priceConfig = function () {
+  return { source: priceConfigSource, config: Object.assign({}, CONFIG) };
 };
 
 /* ---------- 3. 全局状态 ---------- */
@@ -198,6 +298,10 @@ function showLogin() {
 async function onLoggedIn() {
   $('login-view').classList.add('hidden');
   $('app').classList.remove('hidden');
+  // 2026-10-04 共享配置：先对齐工资参数（本地缓存 → 云端 profiles），再加载/渲染记录。
+  // 必须早于 loadRecords()/renderHistory()：历史页与工资页的金额直接依赖 CONFIG。
+  // 失败时保留上一次成功配置（有缓存用缓存），绝不回落到硬编码 4/4/30。
+  await initPriceConfig();
   await loadRecords();
   startAutoPull();   // 登录成功后启动自动拉取（每 30 秒刷新）
   updateSyncStatus();
@@ -263,8 +367,11 @@ async function loadRecords() {
  *  重复调用安全——若已有定时器则直接跳过，避免叠加多个 setInterval。 */
 function startAutoPull() {
   if (autoPullTimer !== null) return;
-  autoPullTimer = setInterval(() => {
+  autoPullTimer = setInterval(async () => {
     console.log('[TEMP-DEBUG] AUTOPULL', todayDirty);   // 探针6：30s 自动拉取时 dirty 状态
+    // 2026-10-04 共享配置：先对齐工资参数，再 loadRecords（后者内部会重绘历史/今日）。
+    // 这样 Mac 端改完价，已打开的 PWA 最多 30 秒后金额自动跟上，无需重新部署或手动刷新。
+    try { await refreshPriceConfig(); } catch (_) {}
     loadRecords();                 // 双向同步（行为不变）
     updateSyncStatus();            // 刷新待同步计数显示
     if (navigator.onLine) flushPending();   // 定时补推（flushPending 自带防重入）
