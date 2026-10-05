@@ -39,6 +39,10 @@
 
     <!-- 顶部导航栏（iOS 玻璃导航 + 日期切换） -->
     <header class="topbar glass-nav">
+      <!-- 同步状态胶囊（#sync-status）：绝对定位的 top-left 胶囊。
+           必须是 .topbar 的直接子级 —— 若留在 .nav-meta 内，定位祖先是仅 32px 宽的
+           .nav-meta，胶囊会被挤到右侧压住 #account-btn，导致账户按钮点不到。 -->
+      <span id="sync-status" class="sync-status" role="button" tabindex="0" title="点击立即同步">…</span>
       <!-- 日期模式（今日页） -->
       <div class="nav-datemode" id="nav-datemode">
         <button id="nav-prev" class="nav-arrow" aria-label="前一天">‹</button>
@@ -53,7 +57,6 @@
         <span id="topbar-title" class="topbar-title"></span>
       </div>
       <div class="nav-meta">
-        <span id="sync-status" class="sync-status" role="button" tabindex="0" title="点击立即同步">…</span>
         <button id="account-btn" class="account-btn" aria-label="账户菜单" title="账户菜单">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
