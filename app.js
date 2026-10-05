@@ -739,7 +739,7 @@ function computeSalary(recs) {
 }
 
 /* ---------- 8. 视图切换 ---------- */
-const TAB_TITLE = { today: '今日', history: '历史', income: '收入记录', salary: '工资' };
+const TAB_TITLE = { today: '今日', history: '历史', income: '收入记录', salary: '工资', settings: '设置' };
 function switchTab(tab) {
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
   $(tab + '-view').classList.add('active');
@@ -1167,6 +1167,20 @@ function handleSalaryCalc() {
     </div>`;
 }
 
+/* ---------- 设置页（账户菜单 →「设置」进入；本轮仅「可打开 + 可返回」） ----------
+   复用既有 switchTab 视图机制：settings-view 已在 index.html 中定义，
+   switchTab('settings') 会自动隐藏日期簇、显示顶栏标题「设置」。
+   不触碰登录 / Supabase / localdb / 同步逻辑 / 数据结构。 */
+let settingsReturnTab = 'today';
+function openSettings() {
+  // 记录来源视图，返回时回到原页面；已在设置页时不覆盖（避免来源被记成 settings）
+  const active = document.querySelector('.view.active');
+  if (active && active.id !== 'settings-view') settingsReturnTab = active.id.replace(/-view$/, '');
+  switchTab('settings');
+  window.scrollTo({ top: 0 });
+}
+function closeSettings() { switchTab(settingsReturnTab || 'today'); }
+
 /* ---------- 账户菜单（iOS 风格） ---------- */
 function toggleAccountMenu() {
   const menu = $('account-menu');
@@ -1181,8 +1195,10 @@ function handleAccountAction(action) {
   closeAccountMenu();
   if (action === 'logout') {
     handleLogout();
+  } else if (action === 'settings') {
+    openSettings();
   }
-  // 账号管理 / 设置为预留入口，当前无操作
+  // 账号管理仍为预留入口，当前无操作
 }
 
 /* ---------- 12c. 收入记录（P1-1 · 独立命名空间，仅复用 income_records 现有字段） ---------- */
@@ -1365,6 +1381,10 @@ function bindEvents() {
     });
   }
   document.addEventListener('click', closeAccountMenu);
+
+  // 设置页返回入口（账户菜单 →「设置」）
+  const settingsBack = $('settings-back');
+  if (settingsBack) settingsBack.addEventListener('click', closeSettings);
 
   document.querySelectorAll('.tab').forEach((t) =>
     t.addEventListener('click', () => switchTab(t.dataset.tab)));
