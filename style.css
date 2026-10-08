@@ -552,7 +552,7 @@ input, button { font-family: inherit; }
   text-align: right; font-variant-numeric: tabular-nums; margin-top: 4px; letter-spacing: -.5px;
 }
 
-/* ---------- 设置页（账户菜单 →「设置」；本轮仅页面骨架 + 返回入口） ---------- */
+/* ---------- 设置页（账户菜单 →「设置」） ---------- */
 .settings-back {
   display: inline-flex; align-items: center; gap: 3px;
   margin: 2px 0 10px; padding: 8px 15px 8px 10px;
@@ -564,8 +564,6 @@ input, button { font-family: inherit; }
 }
 .settings-back svg { width: 18px; height: 18px; flex: none; }
 .settings-back:active { background: rgba(120,120,128,.22); transform: scale(.96); }
-.settings-soon { font-size: 15px; font-weight: 600; color: var(--text); text-align: center; padding: 10px 0 6px; }
-.settings-soon-sub { font-size: 13px; color: var(--text-sub); text-align: center; line-height: 1.55; padding: 0 4px 4px; }
 
 /* ---------- 底部标签栏（iOS TabBar：毛玻璃、SF Symbols 风格图标、安全区） ---------- */
 .tabbar {
@@ -639,3 +637,76 @@ input, button { font-family: inherit; }
 .toggle-row { display: flex; align-items: center; justify-content: space-between; }
 .toggle-row label { margin-bottom: 0; }
 .hrow-total { font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+ * S2c 第二阶段 · 设置页价格参数（7 项可编辑 + 步进 + 二次确认）
+ * 全部为增量：复用既有 CSS 变量（--text/--text-sub/--fill/--line/--r-card/--brand）
+ * 与既有组件视觉规格（.nav-arrow / .card / .btn-primary / .modal），不引入新视觉体系。
+ * 布局目标：320px 宽也不换行、不横向溢出。
+ * ============================================================ */
+
+/* 表单卡：去掉 .card 的内边距，让 .ps-row 自己撑出行高与发丝线（同 .entry-card 思路） */
+.ps-card { padding: 0; overflow: hidden; }
+
+/* 一行：标签（占满剩余宽度）+ 步进组（− 输入 +） */
+.ps-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; min-height: 50px;
+  border-top: .5px solid rgba(60,60,67,.10);
+}
+.ps-row:first-child { border-top: none; }
+.ps-row:focus-within { background: rgba(0,122,255,.04); }
+
+/* 字段名 + 小字单位 */
+.ps-label {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+  font-size: 15px; font-weight: 400; color: var(--text);
+  overflow: hidden;
+}
+.ps-unit { font-style: normal; font-size: 11px; font-weight: 500; color: var(--text-sub); }
+
+/* 圆形步进按钮（参照 .nav-arrow 的 32px 灰底圆规格，略收窄以适配 320px） */
+.ps-step {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; border: none;
+  background: rgba(120,120,128,.12); color: var(--text);
+  font-size: 19px; font-weight: 600; line-height: 1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .15s ease, transform .12s ease;
+}
+.ps-step:active { background: rgba(120,120,128,.24); transform: scale(.9); }
+
+/* 直接输入框：等宽数字、居中、浅灰填充底（不依赖 .field 的大字号以免撑高行） */
+.ps-input {
+  flex: none; width: 66px; height: 34px;
+  border: none; border-radius: 9px;
+  background: var(--fill); color: var(--text);
+  font-size: 16px; font-weight: 600; text-align: center;
+  padding: 0 4px; outline: none;
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+  transition: box-shadow .15s ease, background .15s ease;
+}
+.ps-input:focus { background: #fff; box-shadow: 0 0 0 3px rgba(0,122,255,.18); }
+.ps-input::-webkit-inner-spin-button,
+.ps-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.ps-input { -moz-appearance: textfield; appearance: textfield; }
+
+/* 分组之间的背景间隙（单价组 ↔ 工资组） */
+.ps-div { height: 8px; background: var(--bg); margin: 0; }
+
+/* 保存按钮与提示的呼吸空间 */
+#settings-view #settings-save { margin-top: 4px; }
+#settings-status { text-align: center; }
+
+/* ---- 二次确认弹层内的「修改前 → 修改后」逐项列表 ---- */
+.pc-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 5px 0; font-size: 14px; color: var(--text);
+  border-top: .5px solid rgba(60,60,67,.10);
+}
+.pc-item:first-child { border-top: none; }
+.pc-item > span:first-child { flex: 1 1 auto; min-width: 0; color: var(--text); }
+.pc-item .pc-delta { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text-sub); }
+.pc-item .pc-delta b { color: var(--brand); font-weight: 600; }

@@ -212,18 +212,68 @@
       </section>
 
       <!-- ---------- 设置（由右上角账户菜单 →「设置」进入） ----------
-           本轮只实现「能打开 + 能返回」的页面骨架，具体设置项后续再加。
-           复用既有 .view / .card / .section-title 体系，不引入新架构。 -->
+           S2c 第二阶段：7 项价格参数可编辑（单价组 ±1 / 工资组 ±100）+ 二次确认。
+           复用既有 .view / .card / .section-title / .btn-primary / .modal 体系，不引入新架构。
+           铁律：输入框只是【暂存区】—— 确认前不触碰 CONFIG / pending / Supabase；
+                唯一写入口是 window.savePriceConfigPatch（见 app.js）。
+           data-field 取值必须与 app.js 的 PRICE_UI_ROWS / CONFIG 字段名（camelCase）一致；
+           data-step 只表示方向（-1 / +1），步进幅度由 PRICE_UI_ROWS[field].step 决定。 -->
       <section id="settings-view" class="view">
         <button id="settings-back" class="settings-back" aria-label="返回上一页">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
           <span>返回</span>
         </button>
         <div class="section-title">设置</div>
-        <div class="card">
-          <div class="settings-soon">设置项即将推出</div>
-          <div class="settings-soon-sub">当前版本仅开放设置页面入口，具体设置项将在后续版本加入。</div>
+        <div class="section-title">单价与工资参数</div>
+        <div class="card ps-card" id="ps-card">
+          <!-- 单价组（步进 ±1） -->
+          <div class="ps-row" data-field="price">
+            <span class="ps-label">出单单价<em class="ps-unit">元/单</em></span>
+            <button type="button" class="ps-step" data-step="-1" aria-label="减少出单单价">−</button>
+            <input class="ps-input" id="ps-price" type="number" inputmode="numeric" min="1" step="1" aria-label="出单单价" />
+            <button type="button" class="ps-step" data-step="1" aria-label="增加出单单价">+</button>
+          </div>
+          <div class="ps-row" data-field="notePrice">
+            <span class="ps-label">图文单价<em class="ps-unit">元/条</em></span>
+            <button type="button" class="ps-step" data-step="-1" aria-label="减少图文单价">−</button>
+            <input class="ps-input" id="ps-notePrice" type="number" inputmode="numeric" min="1" step="1" aria-label="图文单价" />
+            <button type="button" class="ps-step" data-step="1" aria-label="增加图文单价">+</button>
+          </div>
+          <div class="ps-row" data-field="materialPrice">
+            <span class="ps-label">素材单价<em class="ps-unit">元/条</em></span>
+            <button type="button" class="ps-step" data-step="-1" aria-label="减少素材单价">−</button>
+            <input class="ps-input" id="ps-materialPrice" type="number" inputmode="numeric" min="1" step="1" aria-label="素材单价" />
+            <button type="button" class="ps-step" data-step="1" aria-label="增加素材单价">+</button>
+          </div>
+          <div class="ps-row" data-field="videoPrice">
+            <span class="ps-label">视频单价<em class="ps-unit">元/条</em></span>
+            <button type="button" class="ps-step" data-step="-1" aria-label="减少视频单价">−</button>
+            <input class="ps-input" id="ps-videoPrice" type="number" inputmode="numeric" min="1" step="1" aria-label="视频单价" />
+            <button type="button" class="ps-step" data-step="1" aria-label="增加视频单价">+</button>
+          </div>
+          <div class="ps-div"></div>
+          <!-- 工资组（步进 ±100） -->
+          <div class="ps-row" data-field="salaryThreshold">
+            <span class="ps-label">底薪达标线<em class="ps-unit">元</em></span>
+            <button type="button" class="ps-step" data-step="-1" aria-label="减少底薪达标线">−</button>
+            <input class="ps-input" id="ps-salaryThreshold" type="number" inputmode="numeric" min="1" step="1" aria-label="底薪达标线" />
+            <button type="button" class="ps-step" data-step="1" aria-label="增加底薪达标线">+</button>
+          </div>
+          <div class="ps-row" data-field="salaryHigh">
+            <span class="ps-label">达标底薪<em class="ps-unit">元</em></span>
+            <button type="button" class="ps-step" data-step="-1" aria-label="减少达标底薪">−</button>
+            <input class="ps-input" id="ps-salaryHigh" type="number" inputmode="numeric" min="1" step="1" aria-label="达标底薪" />
+            <button type="button" class="ps-step" data-step="1" aria-label="增加达标底薪">+</button>
+          </div>
+          <div class="ps-row" data-field="salaryLow">
+            <span class="ps-label">未达标底薪<em class="ps-unit">元</em></span>
+            <button type="button" class="ps-step" data-step="-1" aria-label="减少未达标底薪">−</button>
+            <input class="ps-input" id="ps-salaryLow" type="number" inputmode="numeric" min="1" step="1" aria-label="未达标底薪" />
+            <button type="button" class="ps-step" data-step="1" aria-label="增加未达标底薪">+</button>
+          </div>
         </div>
+        <button id="settings-save" class="btn-primary">保存</button>
+        <div id="settings-status" class="hint"></div>
       </section>
 
     </main>
@@ -313,6 +363,21 @@
       <div class="modal-actions">
         <button id="revive-cancel" class="btn-ghost">取消</button>
         <button id="revive-confirm" class="btn-primary">恢复并保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 价格设置二次确认弹层（S2c 第二阶段：确认保存前逐项列出「修改前 → 修改后」）
+       复用既有 .modal / .modal-card / .modal-actions 体系（与 #revive-modal 同款），零新增视觉体系。
+       取消 → 完全回滚（不产生任何 pending、不写云端）；确认 → 唯一入口 window.savePriceConfigPatch。 -->
+  <div id="price-confirm-modal" class="modal hidden">
+    <div class="modal-backdrop" id="price-confirm-backdrop"></div>
+    <div class="modal-card">
+      <div class="modal-title">确认修改价格设置？</div>
+      <div class="modal-body" id="price-confirm-body"></div>
+      <div class="modal-actions">
+        <button id="price-confirm-cancel" class="btn-ghost">取消</button>
+        <button id="price-confirm-ok" class="btn-primary">确认保存</button>
       </div>
     </div>
   </div>
