@@ -1,13 +1,17 @@
 # ============================================================================
-# Ledger PWA — 安全构建（构建期凭据注入，不发布）
+# Ledger PWA — 安全构建 + 正式发布（构建期凭据注入 → 校验 → Pages 部署）
 # ----------------------------------------------------------------------------
 # 放置位置：仓库 sheep0927-Hl/ledger-pwa 的 .github/workflows/build-pwa.yml
-# 触发方式：仅 workflow_dispatch（手动），不监听 push / schedule，避免自动发布。
+# 触发方式：仅 workflow_dispatch（手动），不监听 push / schedule，禁止自动发布。
 # 凭据来源：Repository Secrets —— SUPABASE_URL、SUPABASE_PUBLISHABLE_KEY。
 # 安全约束：
 #   - 只注入 publishable / anon 公钥；注入器 fail-closed 拒绝服务端秘密。
 #   - 凭据仅存在于本次 job 的环境变量，构建后随 runner 销毁；不写日志/源码/Git。
-#   - 本 workflow 只生成并上传构建产物 artifact，**不含任何 deploy / pages / push 步骤**。
+#   - deploy job 独立于 build job；仅在 build + 扫描 + SHA 锚定全部通过后运行。
+#   - SHA 锚定（deploy job）：部署内容必须与本地已验证版本逐字节一致，
+#     包括工资规则 final_wage.js（与 Mac 9.11 对齐、43 项验证通过）与
+#     注入后 config.js（生产凭据正确性；密钥轮换时须同步更新此锚）。
+#   - upload-artifact 开启 include-hidden-files，保证 .nojekyll 进入发布包。
 # ============================================================================
 name: Build PWA (secure config injection)
 
@@ -61,13 +65,78 @@ jobs:
           find . -type f -not -name '.DS_Store' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           echo "[PASS] SHA256SUMS.txt 已生成（$(wc -l < SHA256SUMS.txt) 条）"
 
-      - name: 上传构建产物（仅 artifact，不发布）
+      - name: 上传构建产物（含隐藏文件，供 deploy job 校验部署）
         uses: actions/upload-artifact@v4
         with:
           name: ledger-pwa-build
           path: dist/
           if-no-files-found: error
           retention-days: 14
+          include-hidden-files: true
 
-      # 明确：本 workflow 不含 pages deploy / git push / 外部网络写操作。
-      # 发布须另行单独授权并走受保护流程。
+  # ---------------------------------------------------------------------------
+  # deploy：独立正式发布 job（手动触发的 workflow 才会走到这里）
+  # 前置条件（needs: build 全部通过）：Secrets 校验 / fail-closed 注入 /
+  # 安全扫描 / SHA256 清单生成 —— 任何一步失败即不会部署。
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: ledger-pwa-build
+          path: dist
+
+      - name: 发布前 SHA 锚定校验（部署内容 = 已验证内容，fail-closed）
+        run: |
+          cd dist
+          ANCHORS=$(mktemp)
+          cat > "$ANCHORS" << 'EOF'
+          c89f32c3bddcdd76d802b9318d7d606804ec35e56082ef9df14ec07c281d4e69  index.html
+          6762f13c40a5dfbd4594911ead7965ed71ac469a07d1d23e3a42153f890a3f75  style.css
+          612cf7c57c7ec74785c19bed77aa978ac301ce77ea7f5bf6393a9441dec87344  service-worker.js
+          ae74c9bb640e61d7fde761099c20790b41a6dcb405ef0b6d62a31a1a1df435c1  app.js
+          e6fa8a68c9e031546858259417021d93d6430c051fcb4f65515666719be2e3d6  localdb.js
+          e6c21e05fab08d60a7622b94e58b7ec92c3181be59cf22041febc55a985a90a9  manifest.json
+          c7e3094a5512e2dc2c6459d6da334ba9d20b770c1d24891d7704987c588165b1  readonly_guard.js
+          ee4a86de312eb9ce7338a1ce18b77251bdff881e62fc1da0c49ffa7464f15bda  piecework_sync.js
+          7a80b0c06424147b41191034f2149879bbcba614abd00127568d95316f89d5b1  final_wage.js
+          45d5053d5ea66f1d9f4b51bde628f7123e779c0ea0d44e82490e738740ff7cd2  final_wage_ui.js
+          f4c6d0e5290e4a58471afcb0a62a10848c31157186ad3f81cb2bd0cd22c1494a  config.js
+          61010a711aa585660cc5132babd6da57fd89a973b845412c8916f8573a455c2b  vendor/supabase.js
+          2cf8177f34f3ba21d716036c40d1306de5db50ed79b0a507c683d116c9e4e443  icons/icon-180.png
+          17bab520dd1934ee3bc5a38f2a5ff23556a8d2886d6d9e44f729f51326249729  icons/icon-192.png
+          0c99e6e698d4ff0f46c2e37f291e8ef8d2808451466d8c7a628cdc7d1b845878  icons/icon-512-maskable.png
+          f8fdcf8be0ef55d09f81f670814c45ddcdeb701ca47baf57b87bdeb09047f448  icons/icon-512.png
+          e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .nojekyll
+          EOF
+          if ! sha256sum -c "$ANCHORS" --strict; then
+            echo "[FATAL] SHA 锚定校验失败：部署内容与已验证版本不一致，拒绝发布"; exit 3
+          fi
+          echo "[PASS] 17 项运行时文件 SHA 锚定全部通过（含工资规则与生产配置）"
+          rm -f "$ANCHORS"
+
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传 Pages 发布包
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      # 部署即正式发布：本 job 仅由手动 workflow_dispatch 触发，
+      # 且部署内容经 17 项 SHA 锚定，与本地通过全部验证的生产候选逐字节一致。
