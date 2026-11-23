@@ -104,8 +104,8 @@ jobs:
           cat > "$ANCHORS" << 'EOF'
           c89f32c3bddcdd76d802b9318d7d606804ec35e56082ef9df14ec07c281d4e69  index.html
           6762f13c40a5dfbd4594911ead7965ed71ac469a07d1d23e3a42153f890a3f75  style.css
-          612cf7c57c7ec74785c19bed77aa978ac301ce77ea7f5bf6393a9441dec87344  service-worker.js
-          ae74c9bb640e61d7fde761099c20790b41a6dcb405ef0b6d62a31a1a1df435c1  app.js
+          8d31890a699b3e47288e5e9e17e9b5d3ec933f2b04db495220c917d4e1880fa5  service-worker.js
+          ef6bf75bbc5df6cc19b4745e0d3a994475322a664d4fdbcbb346a10adcf0aa81  app.js
           e6fa8a68c9e031546858259417021d93d6430c051fcb4f65515666719be2e3d6  localdb.js
           e6c21e05fab08d60a7622b94e58b7ec92c3181be59cf22041febc55a985a90a9  manifest.json
           c7e3094a5512e2dc2c6459d6da334ba9d20b770c1d24891d7704987c588165b1  readonly_guard.js

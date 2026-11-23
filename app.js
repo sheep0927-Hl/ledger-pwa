@@ -11,7 +11,12 @@
  * 本轮三套 profile 的 url/key 全为空 → 一律进入【离线只读模式】，
  * 不创建真实云端 client、零真实云端连接，只显示本地缓存并明确标注离线。 */
 const LEDGER_CFG = window.LEDGER_ENV_CONFIG || null;
-const LEDGER_ENV = window.LEDGER_ENV || 'dev';
+/* 环境选择单一真相源 = config.js 的 ACTIVE_ENV（构建期注入器会把 dev 锚点改为 prod）。
+ * window.LEDGER_ENV 仅作为显式覆盖入口；末位 'dev' 为源码版兜底。
+ * 修复记录：旧写法 window.LEDGER_ENV || 'dev' 从未读到注入结果（window.LEDGER_ENV
+ * 不存在），导致生产注入后仍恒取空占位 dev profile → 恒进离线只读。 */
+const LEDGER_ENV = window.LEDGER_ENV ||
+  (LEDGER_CFG && LEDGER_CFG.ACTIVE_ENV) || 'dev';
 const LEDGER_PROFILE = (LEDGER_CFG && LEDGER_CFG.profiles && LEDGER_CFG.profiles[LEDGER_ENV]) || {};
 const SUPABASE_URL = LEDGER_PROFILE.url || '';
 const SUPABASE_KEY = LEDGER_PROFILE.key || '';
