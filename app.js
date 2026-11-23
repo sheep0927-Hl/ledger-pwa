@@ -13,16 +13,23 @@
 const LEDGER_CFG = window.LEDGER_ENV_CONFIG || null;
 /* 环境选择单一真相源 = config.js 的 ACTIVE_ENV（构建期注入器会把 dev 锚点改为 prod）。
  * window.LEDGER_ENV 仅作为显式覆盖入口；末位 'dev' 为源码版兜底。
- * 修复记录：旧写法 window.LEDGER_ENV || 'dev' 从未读到注入结果（window.LEDGER_ENV
- * 不存在），导致生产注入后仍恒取空占位 dev profile → 恒进离线只读。 */
+ * 修复记录 1：旧写法 window.LEDGER_ENV || 'dev' 从未读到注入结果（window.LEDGER_ENV
+ * 不存在），导致生产注入后仍恒取空占位 dev profile → 恒进离线只读。
+ * 修复记录 2（2026-11-23 根因）：旧判定把 LEDGER_READ_ONLY 并入 OFFLINE_READONLY，
+ * 而 config.js 恒有 READ_ONLY: true（只读查看端定位）→ 即使凭据注入成功、
+ * window.supabase 正常，OFFLINE_READONLY 也恒为 true → 状态胶囊恒显
+ * 「只读 · 未配置环境」。语义拆分：OFFLINE_READONLY 只表示「无法连接云端」；
+ * 「只读保护」（拦截写路径）由 ReadOnlyGuard 独立承担，不受此判定影响。 */
+const APP_BUILD_ID = '20261123-readonly-fix-diag1';
 const LEDGER_ENV = window.LEDGER_ENV ||
   (LEDGER_CFG && LEDGER_CFG.ACTIVE_ENV) || 'dev';
 const LEDGER_PROFILE = (LEDGER_CFG && LEDGER_CFG.profiles && LEDGER_CFG.profiles[LEDGER_ENV]) || {};
 const SUPABASE_URL = LEDGER_PROFILE.url || '';
 const SUPABASE_KEY = LEDGER_PROFILE.key || '';
 const LEDGER_READ_ONLY = !!(LEDGER_CFG && LEDGER_CFG.READ_ONLY);
+/* 离线判定（修复后）：只看「能否真实连接云端」，不再包含 LEDGER_READ_ONLY。 */
 const OFFLINE_READONLY = !LEDGER_CFG || !SUPABASE_URL || !SUPABASE_KEY ||
-  !window.supabase || !window.supabase.createClient || LEDGER_READ_ONLY;
+  !window.supabase || !window.supabase.createClient;
 
 /* 离线只读桩：不创建真实云端 client，零网络请求。
  * select 恒返回 error，使读取流程沿用本地缓存并显示「离线只读」，绝不伪造同步成功。 */
@@ -2986,3 +2993,81 @@ window.addEventListener('DOMContentLoaded', async () => {
     } catch (_) {}
   }
 });
+
+/* ---------- 15. 运行时诊断面板（仅 ?diag=1 显示；只报布尔/环境名/ref，严禁密钥值） ---------- */
+/* 用途：获取 iPhone 实机真实运行时证据（区分「代码正确」与「手机实际加载内容」）。
+ * 正常访问（无 diag=1）完全不渲染任何东西，零行为差异。 */
+(async function renderDiagPanel() {
+  'use strict';
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('diag') !== '1') return;   // 只有显式 diag=1 才显示，其余一律不渲染
+
+    const line = (k, v) => '<div style="margin:2px 0;"><b style="color:#333;">' + k +
+      '</b>：<span style="color:#111;">' + String(v) + '</span></div>';
+    const yesNo = (b) => (b ? '✅ 是' : '❌ 否');
+
+    // SW 版本：直接抓取 service-worker.js 源码里的 CACHE 常量（与实际运行一致）
+    let swVersion = '读取失败';
+    let swControls = false, swScript = '—';
+    try {
+      if (navigator.serviceWorker) {
+        swControls = !!navigator.serviceWorker.controller;
+        swScript = (navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL) || '—';
+      }
+      const resp = await fetch('service-worker.js', { cache: 'no-store' });
+      const txt = await resp.text();
+      const m = txt.match(/const\s+CACHE\s*=\s*'([^']+)'/);
+      swVersion = m ? m[1] : '未找到 CACHE 常量';
+    } catch (_) { swVersion = 'fetch 异常'; }
+
+    // 条件逐项拆解（与 OFFLINE_READONLY 判定一一对应）
+    const condNoCfg = !LEDGER_CFG;
+    const condNoUrl = !SUPABASE_URL;
+    const condNoKey = !SUPABASE_KEY;
+    const condNoSb = !window.supabase;
+    const condNoCreate = !!(window.supabase && !window.supabase.createClient);
+
+    // key 类型指纹（不含值）：仅前缀/长度，无法还原密钥
+    let keyFp = '—';
+    if (SUPABASE_KEY) {
+      keyFp = '长度' + SUPABASE_KEY.length + '，前缀 ' +
+        (SUPABASE_KEY.indexOf('eyJ') === 0 ? 'eyJ(JWT/anon)' :
+         SUPABASE_KEY.indexOf('sb_') === 0 ? SUPABASE_KEY.slice(0, 14) + '…' : '未知');
+    }
+
+    // URL 指纹：只显示域名（域名非秘密），不显示完整地址
+    let urlFp = '—';
+    if (SUPABASE_URL) { try { urlFp = new URL(SUPABASE_URL).host; } catch (_) { urlFp = '格式异常'; } }
+
+    const mode = OFFLINE_READONLY ? '❌ OFFLINE_READONLY（离线只读降级）' : '✅ PROD（生产连接模式）';
+    const statusText = OFFLINE_READONLY ? '只读 · 未配置环境' : '生产 · 已连接';
+
+    const html = [
+      '<div id="diag-panel" style="position:fixed;top:0;left:0;right:0;z-index:99999;' +
+        'background:#fffbe6;border-bottom:3px solid #d97706;padding:14px 14px 18px;' +
+        'font:14px/1.5 -apple-system,Menlo,monospace;color:#111;-webkit-overflow-scrolling:touch;">',
+      '<div style="font-weight:700;font-size:16px;margin-bottom:8px;">🔍 运行时诊断（?diag=1）</div>',
+      line('APP_BUILD_ID', APP_BUILD_ID),
+      line('config.js 是否加载', yesNo(!!LEDGER_CFG)),
+      line('ACTIVE_ENV', LEDGER_ENV || '(空)'),
+      line('生效 profile label', (LEDGER_PROFILE && LEDGER_PROFILE.label) || '(空)'),
+      line('prod url 存在', yesNo(!!SUPABASE_URL) + '　域名: ' + urlFp),
+      line('prod key 存在', yesNo(!!SUPABASE_KEY) + '　指纹: ' + keyFp),
+      line('window.supabase 库已加载', yesNo(!!window.supabase)),
+      line('window.supabase.createClient 可用', yesNo(!condNoCreate)),
+      line('SW 版本（CACHE 名）', swVersion),
+      line('SW 是否控制本页面', yesNo(swControls) + '　script: ' + swScript),
+      line('navigator.onLine', yesNo(navigator.onLine)),
+      line('实际模式', mode),
+      line('状态胶囊将显示', statusText),
+      line('离线判定拆解（true=触发离线）',
+        'config缺失:' + condNoCfg + ' / url空:' + condNoUrl + ' / key空:' + condNoKey +
+        ' / supabase缺失:' + condNoSb + ' / createClient缺失:' + condNoCreate),
+      '<div style="margin-top:8px;font-size:12px;color:#78350f;">密钥值永不显示（仅布尔与指纹）。' +
+        '去掉地址栏 ?diag=1 即恢复正常页面。</div>',
+      '</div>'
+    ].join('');
+    document.body.insertAdjacentHTML('afterbegin', html);
+  } catch (_) { /* 诊断面板绝不影响主流程 */ }
+})();
