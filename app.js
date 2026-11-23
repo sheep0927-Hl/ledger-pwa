@@ -6,13 +6,82 @@
 
 'use strict';
 
-/* ---------- 1. Supabase 配置（与 macOS App SyncService 相同） ---------- */
-const SUPABASE_URL = 'https://uvbspoyguzdhbthhhzxk.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_TVpp4fWkDuzzsu4EZbBBvQ_ve5o1j_u';
+/* ---------- 1. 环境配置 / 只读保护（U4 第一批整改） ----------
+ * 生产 URL/Key 已移除；改由 config.js 的 window.LEDGER_ENV_CONFIG 统一提供。
+ * 本轮三套 profile 的 url/key 全为空 → 一律进入【离线只读模式】，
+ * 不创建真实云端 client、零真实云端连接，只显示本地缓存并明确标注离线。 */
+const LEDGER_CFG = window.LEDGER_ENV_CONFIG || null;
+const LEDGER_ENV = window.LEDGER_ENV || 'dev';
+const LEDGER_PROFILE = (LEDGER_CFG && LEDGER_CFG.profiles && LEDGER_CFG.profiles[LEDGER_ENV]) || {};
+const SUPABASE_URL = LEDGER_PROFILE.url || '';
+const SUPABASE_KEY = LEDGER_PROFILE.key || '';
+const LEDGER_READ_ONLY = !!(LEDGER_CFG && LEDGER_CFG.READ_ONLY);
+const OFFLINE_READONLY = !LEDGER_CFG || !SUPABASE_URL || !SUPABASE_KEY ||
+  !window.supabase || !window.supabase.createClient || LEDGER_READ_ONLY;
 
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, storageKey: 'ledger-pwa-auth' }
-});
+/* 离线只读桩：不创建真实云端 client，零网络请求。
+ * select 恒返回 error，使读取流程沿用本地缓存并显示「离线只读」，绝不伪造同步成功。 */
+const OFFLINE_SESSION_KEY = 'ledger-pwa-readonly-session';
+function loadOfflineSession() {
+  try { const raw = localStorage.getItem(OFFLINE_SESSION_KEY); return raw ? JSON.parse(raw) : null; }
+  catch (_) { return null; }
+}
+function makeOfflineClient() {
+  const offlineError = { message: 'READ_ONLY_OFFLINE：未配置云端环境，仅显示本地缓存' };
+  function roBuilder() {
+    const b = {
+      select: () => b, eq: () => b, is: () => b, order: () => b, limit: () => b,
+      then: (resolve, reject) => Promise.resolve({ data: null, error: offlineError, count: 0 }).then(resolve, reject)
+    };
+    return b;
+  }
+  return {
+    from: () => roBuilder(),
+    auth: {
+      getSession: () => Promise.resolve({ data: { session: loadOfflineSession() }, error: null }),
+      setSession: () => Promise.resolve({ data: { session: null }, error: offlineError }),
+      signInWithPassword: (p) => {
+        const s = { access_token: 'offline', refresh_token: 'offline',
+          user: { id: 'offline-readonly', email: (p && p.email) || '' } };
+        try { localStorage.setItem(OFFLINE_SESSION_KEY, JSON.stringify(s)); } catch (_) {}
+        return Promise.resolve({ data: { user: s.user, session: s }, error: null });
+      },
+      signOut: () => {
+        try { localStorage.removeItem(OFFLINE_SESSION_KEY); } catch (_) {}
+        return Promise.resolve({ error: null });
+      },
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } })
+    }
+  };
+}
+
+let sb = OFFLINE_READONLY
+  ? makeOfflineClient()
+  : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, storageKey: 'ledger-pwa-auth' }
+    });
+
+// 创建 client 后立即安装只读保护（代理 sb.from 的写路径 + 拦截业务写 fetch）。
+if (window.LedgerReadOnly && window.LedgerReadOnly.installReadOnlyGuards) {
+  const installed = window.LedgerReadOnly.installReadOnlyGuards({
+    sb: sb, fetch: window.fetch, config: LEDGER_CFG
+  });
+  sb = installed.sb;
+  if (installed.fetch) window.fetch = installed.fetch;
+}
+
+/* 统一写拦截：任何遗漏路径都 fail-closed（guard 缺失时也抛）。 */
+function assertReadOnly(op, detail) {
+  if (window.LedgerReadOnly && typeof window.LedgerReadOnly.assertWrite === 'function') {
+    window.LedgerReadOnly.assertWrite(op, detail || {});
+  }
+  throw new Error('[LedgerReadOnly] 只读查看端：写操作 ' + op + ' 已被拦截');
+}
+
+/* 仅在 select 成功后写入，供同步状态页展示「最后成功拉取时间」。 */
+async function markPullSuccess() {
+  try { await LocalDB.setMeta('lastPullSuccessAt', new Date().toISOString()); } catch (_) {}
+}
 
 // ---- 方案A：会话镜像备份（绕过 iOS 偶发清空 Supabase 自带 storageKey）----
 const SESSION_BACKUP_KEY = 'ledger-pwa-session-backup';
@@ -43,6 +112,14 @@ function defaultAssist(dateStr) {
 const ASSIST_HIDE_FROM = '2026-08-01';
 function isAssistVisible(dateStr) {
   return dateStr < ASSIST_HIDE_FROM;   // 2026-07-31 及以前显示；2026-08-01 起隐藏
+}
+
+// 账号计件「计价生效日期」闸门（本模块）：从 E 起，新模块接管视频/图文发布计价，
+// 防止与旧 daily_records 的 note/video 发布金额双算。E 未配置（未初始化计价）→ 不接管。
+// E 由账号单价历史的最小生效日推导（与 macOS 端 accountEffectiveFrom 口径一致）。
+let pieceworkEffectiveFrom = null;            // 计价生效日期 E（'YYYY-MM-DD'）
+function isPieceworkActive(dateStr) {
+  return !!pieceworkEffectiveFrom && dateStr >= pieceworkEffectiveFrom;
 }
 
 /* ---------- 2. 工资计算参数（共享配置：Supabase public.profiles） ----------
@@ -146,13 +223,12 @@ async function refreshPriceConfig() {
     console.log('[PRICE_CONFIG] profiles 字段级合并: 接受=' + JSON.stringify(merged.accepted) +
                 ' 保留本地=' + JSON.stringify(merged.kept) +
                 ' 待推送=' + JSON.stringify(pendingConfigPatch));
-    if (Object.keys(pendingConfigPatch).length) {
-      try { await pushConfigPatch(); } catch (_) {}   // 本地脏字段续推
-    }
+    // U4：只读查看端，拉取后绝不反向写云端（本地脏字段仅保留、不续推）。
     // S2c 第二阶段（方案 A）：安全状态下把最新云端价格被动回显到设置页输入框。
     // 纯展示层钩子，带三重守卫（非激活 / 有焦点 / 有暂存改动 → 全部跳过），默认 no-op，
     // 不改变本函数的合并 / dirty / patch 任何语义。
     syncSettingsPriceUI();
+    await markPullSuccess();          // 只在 select 成功后记录
     return true;
   } catch (e) {
     console.warn('[PRICE_CONFIG] 拉取失败，沿用上一次成功配置: ' + (e && e.message));
@@ -335,6 +411,7 @@ async function restoreConfigPatchState() {
  * @returns {{ok:boolean, reason?:string, pushed?:boolean, pending:object}}
  */
 async function savePriceConfigPatch(changes) {
+  assertReadOnly('savePriceConfigPatch');
   const fs = normalizeConfigPatch(changes);
   if (!Object.keys(fs).length) {
     return { ok: false, reason: 'no-valid-change', pending: Object.assign({}, pendingConfigPatch) };
@@ -364,6 +441,7 @@ async function savePriceConfigPatch(changes) {
  * @returns {boolean} 是否全部成功（无待推送时返回 true）
  */
 async function pushConfigPatch() {
+  assertReadOnly('pushConfigPatch');
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
   if (isPushingConfig) return false;                    // 防重入（autoPull / online / UI 并发）
   const uid = currentUser ? currentUser.id : null;
@@ -510,6 +588,11 @@ function recordOut(r) {
 }
 function recordGross(r) {
   const c = configAt(r.date);
+  // 账号计件接管：date >= E 时，旧 note/video 发布不再计费，改由本模块计件金额接管（防双算）；
+  // 素材始终照常；E 未配置或 date < E 时沿用旧公式（历史不变，零影响）。
+  if (isPieceworkActive(r.date)) {
+    return num(r.material_qty) * c.materialPrice + pieceworkDailyAmount(r.date);
+  }
   return num(r.note_qty) * c.notePrice + num(r.material_qty) * c.materialPrice + num(r.video_qty) * c.videoPrice;
 }
 function recordTotal(r) { return recordOut(r) + num(r.assist) + recordGross(r); }
@@ -536,14 +619,12 @@ async function refreshPriceVersions() {
     let merged = cloud;
     for (const v of pending) merged = upsertVersion(v, merged);
     if (!merged.length) return false;
-    // 仍有待重试版本 → 借这次拉取机会重试写入（成功即清空；失败保留，下次再试）
-    if (pending.length && await pushVersionsToCloud(merged)) {
-      await savePendingVersions([]);
-    }
+    // U4：只读查看端，待重试版本仅合并展示，绝不借拉取反向写云端。
     PRICE_VERSIONS = merged;
     try { await LocalDB.setMeta(PRICE_VERSIONS_CACHE_KEY, merged); } catch (_) {}
     console.log('[PRICE_VERSIONS] 已应用 ' + merged.length + ' 版: ' + merged.map((v) => v.from).join(',') +
                 (pending.length ? '（含待重试 ' + pending.length + ' 项）' : ''));
+    await markPullSuccess();          // 只在 select 成功后记录
     return true;
   } catch (e) {
     console.warn('[PRICE_VERSIONS] 拉取跳过（列不存在或网络失败，保持现有序列）: ' + (e && e.message));
@@ -594,6 +675,7 @@ async function fetchCloudVersions(uid) {
  * @returns {boolean} 是否确实写成功（列不存在 / 网络失败 / 无行 → false）
  */
 async function pushVersionsToCloud(localSeq) {
+  assertReadOnly('pushVersionsToCloud');
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
   const uid = currentUser ? currentUser.id : null;
   if (!uid) return false;
@@ -623,6 +705,7 @@ async function pushVersionsToCloud(localSeq) {
  * @returns {boolean} 是否已成功写入云端（false = 已记待重试）
  */
 async function recordPriceVersion() {
+  assertReadOnly('recordPriceVersion');
   const uid = currentUser ? currentUser.id : null;
   if (!uid) return false;
   const version = buildVersionFromConfig(todayStr());
@@ -801,13 +884,19 @@ async function onLoggedIn() {
   // 失败时保留上一次成功配置（有缓存用缓存），绝不回落到硬编码 4/4/30。
   await initPriceConfig();
   await loadRecords();
-  startAutoPull();   // 登录成功后启动自动拉取（每 30 秒刷新）
+  // 账号计件模块：登录后即拉取新表，保证今日/历史/工资页的金额接管有数据（防双算依赖它）
+  await loadAccountPrices();
+  await loadAccountPiecework();
+  startAutoPull();   // 登录成功后启动自动「只读拉取」（每 30 秒刷新）
+  // U4：启动流程隔离旧版遗留 outbox，绝不重放；保留 getAllPending 仅用于只读展示数量。
+  if (window.LedgerReadOnly && window.LedgerReadOnly.quarantineOutbox) {
+    window.LedgerReadOnly.quarantineOutbox();
+  }
   updateSyncStatus();
-  if (navigator.onLine) flushPending();   // 启动即补推（fire-and-forget）
-  if (navigator.onLine) pushConfigPatch();   // S1 第 4 步：改价待推送也一并补推（fire-and-forget）
+  renderSyncStatusPage();
   initTodayForm();
   initSalaryDefaults();
-  switchTab('today');
+  switchTab('history');
 }
 
 /* ---------- 6. 数据读写 ---------- */
@@ -842,6 +931,7 @@ async function loadRecords() {
         hasFieldStamps = hasAny && ('xhs_modified_at' in (data[0] || {}));
         hasDeletedColumn = hasAny && ('deleted_at' in (data[0] || {}));
         try { await LocalDB.setMeta('lastSyncAt', new Date().toISOString()); } catch (_) {}
+        await markPullSuccess();   // U4：仅在 select 成功后记录
         localRows = merged;
       }
     } catch (_) { cloudOk = false; }
@@ -851,6 +941,8 @@ async function loadRecords() {
   if (!cloudOk) {
     if (!navigator.onLine) {
       showBanner(localRows.length ? '离线模式：显示本地缓存记录' : '离线模式：暂无本地缓存记录', 'warn');
+    } else if (OFFLINE_READONLY) {
+      showBanner(localRows.length ? '离线只读：仅显示本地缓存记录（未配置云端环境）' : '离线只读：暂无本地缓存记录（未配置云端环境）', 'warn');
     } else {
       showBanner(localRows.length ? '云端读取失败，显示本地缓存记录' : '云端读取失败，无本地缓存', 'error');
     }
@@ -870,12 +962,12 @@ function startAutoPull() {
     console.log('[TEMP-DEBUG] AUTOPULL', todayDirty);   // 探针6：30s 自动拉取时 dirty 状态
     // 2026-10-04 共享配置：先对齐工资参数，再 loadRecords（后者内部会重绘历史/今日）。
     // 这样 Mac 端改完价，已打开的 PWA 最多 30 秒后金额自动跟上，无需重新部署或手动刷新。
+    // U4：30s 定时仅做只读拉取，绝不触发任何补推。
     try { await refreshPriceConfig(); } catch (_) {}
-    try { await refreshPriceVersions(); } catch (_) {}   // S2b：历史价格版本同步跟上
-    try { await pushConfigPatch(); } catch (_) {}        // S1 第 4 步：改价待推送补推（离线残留）
-    loadRecords();                 // 双向同步（行为不变）
-    updateSyncStatus();            // 刷新待同步计数显示
-    if (navigator.onLine) flushPending();   // 定时补推（flushPending 自带防重入）
+    try { await refreshPriceVersions(); } catch (_) {}   // 只读价格版本
+    loadRecords();                 // 只读拉取
+    updateSyncStatus();            // 只读状态刷新
+    renderSyncStatusPage();
   }, 30000);
 }
 
@@ -972,6 +1064,7 @@ function isDateTombstoned(date) { return tombstonedDates.has(date); }
 
 // 保存：upsert + 列缺失降级重试（与 V2.1 同步逻辑一致）。返回 error（null=成功）。
 async function upsertWithFallbacks(payload) {
+  assertReadOnly('upsertWithFallbacks');
   let { error } = await sb.from('daily_records').upsert(payload, { onConflict: 'user_id,date' });
   if (error && /material_qty/i.test(error.message || '')) {
     hasMaterialColumn = false;
@@ -997,6 +1090,7 @@ async function upsertWithFallbacks(payload) {
 
 // 删除：软删除 tombstone（deleted_at 优先规则不变）；列不存在则降级物理删除。返回 error。
 async function cloudDelete(date, deletedAt) {
+  assertReadOnly('cloudDelete');
   let { error } = await sb.from('daily_records').upsert({ user_id: currentUser.id, date, deleted_at: deletedAt }, { onConflict: 'user_id,date' });
   if (error && /deleted_at/i.test(error.message || '')) {
     hasDeletedColumn = false;
@@ -1012,6 +1106,7 @@ async function cloudDelete(date, deletedAt) {
  * 若云端缺少 material_qty 或 *_modified_at 列，自动去掉对应字段重试，并提示用户执行迁移 SQL。
  */
 async function saveRecord(rec, revive = false) {
+  assertReadOnly('saveRecord');
   logPush({ date: rec.date, assist: rec.assist, payload: 'save-start', session: sessState(), result: 'start', error: '-' });
   if (!currentUser) throw new Error('未登录');
   const uid = currentUser.id;
@@ -1087,6 +1182,7 @@ async function saveRecord(rec, revive = false) {
 }
 
 async function deleteRecord(date) {
+  assertReadOnly('deleteRecord');
   if (!currentUser) return;
   const uid = currentUser.id;
   const deletedAt = nowISO();   // 统一 tombstone 时间戳（本地与云端一致）
@@ -1129,6 +1225,7 @@ let isFlushing = false;  // 防止并发补推
 
 // 补推单条 pending（复用即时保存/删除的同一上传函数，保证同步语义一致）
 async function replayPending(entry) {
+  assertReadOnly('replayPending');
   if (!currentUser) throw new Error('未登录');
   if (entry.action === 'save') {
     return await upsertWithFallbacks(entry.payload);
@@ -1140,6 +1237,7 @@ async function replayPending(entry) {
 
 // 网络恢复后补推：按 createdAt 顺序执行，成功一条删一条；失败则停止等待下次
 async function flushPending() {
+  assertReadOnly('flushPending');
   if (isFlushing || !navigator.onLine) return;
   isFlushing = true;
   setSyncing(true);
@@ -1162,51 +1260,84 @@ async function flushPending() {
   }
 }
 
-// 同步状态显示：在线 / 离线 / 待同步 N 条 / 同步中… + 最后同步时间 + 点击手动同步
+// U4：只读同步状态 —— 数据来源 / 最后成功拉取 / 云端读取失败告警 / 只读标识 / 无待上传。
 async function updateSyncStatus() {
   const el = $('sync-status');
   if (!el) return;
 
-  // 首次绑定点击 / 键盘触发手动同步（仅在 UI 层调用既有同步函数，不改动同步逻辑）
+  // 点击状态胶囊 → 纯只读刷新（只调 load 系列，绝不 flush / push）。
   if (!el.dataset.bound) {
     el.dataset.bound = '1';
     const doRefresh = async () => {
-      if (!navigator.onLine) { updateSyncStatus(); return; }
-      setSyncing(true);
-      try { await flushPending(); } catch (_) {}
       try { await loadRecords(); } catch (_) {}
-      setSyncing(false);
+      try { await refreshPriceConfig(); } catch (_) {}
+      try { await refreshPriceVersions(); } catch (_) {}
+      try { await loadIncomeRecords(); } catch (_) {}
       updateSyncStatus();
+      renderSyncStatusPage();
     };
     el.addEventListener('click', doRefresh);
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doRefresh(); }
     });
-    // 空闲时仅刷新显示（不动同步逻辑），保持「N 分钟前」新鲜
     setInterval(() => updateSyncStatus(), 30000);
   }
 
-  let count = 0;
-  try { count = (await LocalDB.getAllPending()).length; } catch (_) {}
-
-  // 最后同步时间（loadRecords 成功写入 lastSyncAt）
-  let lastSync = '';
-  try {
-    const t = await LocalDB.getMeta('lastSyncAt');
-    if (t) {
-      const mins = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
-      lastSync = mins <= 0 ? '刚刚' : mins + ' 分钟前';
-    }
-  } catch (_) {}
+  let lastPullSuccessAt = null;
+  try { lastPullSuccessAt = await LocalDB.getMeta('lastPullSuccessAt'); } catch (_) {}
+  const readFailed = !lastPullSuccessAt;   // 从未成功拉取 → 云端读取失败告警
 
   let text, cls;
-  if (!navigator.onLine) { text = '离线'; cls = 'offline'; }
-  else if (isSyncing) { text = '同步中…'; cls = 'syncing'; }
-  else if (count > 0) { text = '待同步 ' + count + ' 条'; cls = 'pending'; }
-  else { text = lastSync ? ('已同步 · ' + lastSync) : '在线'; cls = 'online'; }
-
+  if (OFFLINE_READONLY) { text = '只读 · 未配置环境'; cls = 'readonly-offline'; }
+  else if (!navigator.onLine) { text = '离线 · 只读'; cls = 'offline'; }
+  else if (readFailed) { text = '云端读取失败 · 只读'; cls = 'warn'; }
+  else { text = '只读 · 无待上传'; cls = 'readonly-ok'; }
+  // 绝不显示「已同步 · N 分钟前」「待同步 N 条」「联网将自动补推」。
   el.textContent = text;
   el.className = 'sync-status ' + cls;
+}
+
+/* 同步状态页（只读）：最后同步时间 / 成功失败 / 待上传恒 0 / 隔离提示 / 错误 / 只读声明。 */
+async function renderSyncStatusPage() {
+  const box = $('status-body');
+  if (!box) return;
+  let lastPullSuccessAt = null;
+  let pendingCount = 0, pieceworkPendingCount = 0;
+  try { lastPullSuccessAt = await LocalDB.getMeta('lastPullSuccessAt'); } catch (_) {}
+  // 遗留 outbox 仅只读计数，绝不重放。
+  try { pendingCount = (await LocalDB.getAllPending()).length; } catch (_) {}
+  try { pieceworkPendingCount = (await LocalDB.getAllPieceworkPending()).length; } catch (_) {}
+  const guard = window.LedgerReadOnly;
+  const blockedCount = guard ? guard.getBlockedCount() : 0;
+  const recent = guard ? guard.getLog().slice(-3).map((e) => e.op).join('、') : '无';
+
+  const fmtTime = (t) => {
+    if (!t) return '从未成功拉取';
+    try { return new Date(t).toLocaleString('zh-CN'); } catch (_) { return '未知'; }
+  };
+  const stateText = OFFLINE_READONLY ? '离线只读（未配置云端环境）'
+    : (lastPullSuccessAt ? '云端读取成功' : '云端读取失败');
+  const rows = [
+    ['只读查看端标识', window.LEDGER_ENV_LABEL || '手机端只读查看端'],
+    ['数据来源', lastPullSuccessAt ? '云端 + 本地缓存' : '本地缓存'],
+    ['最后成功拉取时间', fmtTime(lastPullSuccessAt)],
+    ['当前状态', stateText],
+    ['待上传数量（只读端）', '0'],
+    ['遗留 outbox（已隔离）', pendingCount + ' 条 + 计件 ' + pieceworkPendingCount + ' 条'],
+    ['被拦截写操作计数', String(blockedCount)]
+  ];
+  let html = '<div class="ro-status-card"><div class="ro-status-title">同步状态（只读）</div>';
+  for (const r of rows) {
+    html += '<div class="ro-status-row"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>';
+  }
+  html += '</div>';
+  html += '<div class="ro-status-note">历史遗留待上传，请在电脑端处理；本端不重放、不补推。</div>';
+  if (!lastPullSuccessAt) {
+    html += '<div class="ro-status-alert">云端读取失败告警：当前仅显示本地缓存，未伪造同步成功。</div>';
+  }
+  html += '<div class="ro-status-note">最近拦截：' + (recent || '无') + '</div>';
+  html += '<div class="ro-status-decl">客户端只读保护，不是服务端 RLS 强制隔离。</div>';
+  box.innerHTML = html;
 }
 
 function setSyncing(v) { isSyncing = v; updateSyncStatus(); }
@@ -1221,34 +1352,40 @@ function computeSalary(recs) {
   const sumAssist = recs.reduce((a, r) => a + (isAssistVisible(r.date) ? num(r.assist) : 0), 0); // V2.6.1：仅计入 <2026-08-01 的助播（展示层）
 
   let refundCut = 0, xhsAmt = 0, dyAmt = 0;
-  let noteIncome = 0, matIncome = 0, vidIncome = 0;
+  let noteIncome = 0, matIncome = 0, vidIncome = 0, pieceworkIncome = 0;
   for (const r of recs) {
     const c = configAt(r.date);
     refundCut  += num(r.refund) * c.price;
     xhsAmt     += num(r.xhs) * c.price;
     dyAmt      += num(r.dy) * c.price;
-    noteIncome += num(r.note_qty) * c.notePrice;          // 图片收入
-    matIncome  += num(r.material_qty) * c.materialPrice;  // 素材收入
-    vidIncome  += num(r.video_qty) * c.videoPrice;        // 视频收入
+    // 账号计件接管：date >= E 时，旧 note/video 发布不计入，改由本模块计件金额接管（防双算）；
+    // date < E 时仍按旧口径计入 note/video；素材任何日期照常。
+    if (isPieceworkActive(r.date)) {
+      pieceworkIncome += pieceworkDailyAmount(r.date);
+    } else {
+      noteIncome += num(r.note_qty) * c.notePrice;          // 图片收入
+      vidIncome  += num(r.video_qty) * c.videoPrice;        // 视频收入
+    }
+    matIncome  += num(r.material_qty) * c.materialPrice;  // 素材收入（始终）
   }
   const liveIncome = xhsAmt + dyAmt - refundCut;          // 直播出单收入
-  const accIncome = noteIncome + matIncome + vidIncome;   // 账号笔记视频收入
+  const accIncome = noteIncome + matIncome + vidIncome;   // 账号笔记视频收入（规则一：计件不参与底薪档位判定）
 
   const mc = configForMonth(earliestMonth(recs));         // 该月生效的底薪参数
   const base = (liveIncome + accIncome) > mc.salaryThreshold ? mc.salaryHigh : mc.salaryLow;
-  const total = liveIncome + accIncome + base;            // 应发总额（助播不计入，与 macOS 一致）
+  const total = liveIncome + accIncome + base + pieceworkIncome;   // 应发总额（计件单独计入，不参与档位）
 
   return {
     sumXHS, sumDY, sumRef, sumNote, sumMat, sumVid, sumAssist,
     xhsAmt, dyAmt, refundCut, liveIncome,
-    noteIncome, matIncome, vidIncome, accIncome,
+    noteIncome, matIncome, vidIncome, pieceworkIncome, accIncome,
     base, total,
     threshold: mc.salaryThreshold                           // 本次判定所用的达标线（展示层）
   };
 }
 
 /* ---------- 8. 视图切换 ---------- */
-const TAB_TITLE = { today: '今日', history: '历史', income: '收入记录', salary: '工资', settings: '设置' };
+const TAB_TITLE = { today: '今日', history: '历史记录', income: '收入记录', salary: '工资管理', piecework: '计件', settings: '设置', status: '同步状态' };
 function switchTab(tab) {
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
   $(tab + '-view').classList.add('active');
@@ -1263,9 +1400,11 @@ function switchTab(tab) {
   // 进入历史/工资页时主动刷新一次：历史页即时重渲染 + 拉取最新；
   // 工资页为按需计算，这里只刷新底层 records，确保点「计算」用的是最新数据。
   if (tab === 'history') { renderHistory(); loadRecords(); }
-  else if (tab === 'salary') { loadRecords(); }
+  else if (tab === 'salary') { loadRecords(); loadAccountPiecework(); }
   else if (tab === 'today') { renderToday(); }
   else if (tab === 'income') { loadIncomeRecords(); renderIncomeRecords(); }
+  else if (tab === 'piecework') { Promise.all([loadAccountPrices(), loadAccountPiecework()]).then(renderPiecework); }
+  else if (tab === 'status') { renderSyncStatusPage(); }   // U4：同步状态页（只读）
 }
 
 /* ---------- 8b. 顶部日期切换（iOS 风格，纯 UI 层） ---------- */
@@ -1428,6 +1567,7 @@ function showReviveModal(rec) {
 }
 
 async function handleTodaySave() {
+  assertReadOnly('handleTodaySave');
   const rec = readTodayInputs();
   if (!rec.date) { $('t-status').textContent = '请选择日期'; return; }
   const btn = $('t-save');
@@ -1559,6 +1699,7 @@ function openEdit(date) {
 function closeEdit() { $('edit-sheet').classList.add('hidden'); }
 
 async function handleEditSave() {
+  assertReadOnly('handleEditSave');
   const rec = {
     date: $('e-date').value,
     xhs: num($('e-xhs').value), dy: num($('e-dy').value), refund: num($('e-refund').value),
@@ -1595,6 +1736,7 @@ async function handleEditSave() {
 }
 
 async function handleEditDelete() {
+  assertReadOnly('handleEditDelete');
   const date = $('e-date').value;
   if (!confirm(`确定删除 ${date} 的记录？将标记删除（可恢复），并同步到所有设备。`)) return;
   const btn = $('e-delete');
@@ -1662,6 +1804,7 @@ function handleSalaryCalc() {
     <div class="sal-row"><div class="sal-l">图文收入<em>${s.sumNote} 条</em></div><b>${fmtMoney(s.noteIncome)}</b></div>
     <div class="sal-row"><div class="sal-l">素材收入<em>${s.sumMat} 条</em></div><b>${fmtMoney(s.matIncome)}</b></div>
     <div class="sal-row"><div class="sal-l">视频收入<em>${s.sumVid} 条</em></div><b>${fmtMoney(s.vidIncome)}</b></div>
+    ${s.pieceworkIncome !== 0 ? `<div class="sal-row"><div class="sal-l">账号计件收入</div><b>${fmtMoney(s.pieceworkIncome)}</b></div>` : ''}
     <div class="sal-row strong"><div class="sal-l">账号笔记视频收入</div><b>${fmtMoney(s.accIncome)}</b></div>
     <div class="sal-div"></div>
     <div class="sal-row"><div class="sal-l">底薪<em>${(s.liveIncome + s.accIncome) > s.threshold ? '已达标' : '未达标'}</em></div><b>${fmtMoney(s.base)}</b></div>
@@ -1814,6 +1957,7 @@ function stepSettingsPrice(field, dir) {
 
 /** 点「保存」：无变化 → 只提示不开弹层；有变化 → 填充确认列表并打开二次确认。 */
 function requestPriceSave() {
+  assertReadOnly('requestPriceSave');
   const changes = settingsPriceChanges();
   const cols = Object.keys(changes);
   if (!cols.length) { settingsPriceDirty = false; setPriceUiStatus('没有需要保存的修改'); return; }
@@ -1846,6 +1990,7 @@ function closePriceConfirm() {
 
 /** 确认：【唯一】调用 window.savePriceConfigPatch 的地方（只传真正变化的字段）。 */
 async function confirmPriceSave() {
+  assertReadOnly('confirmPriceSave');
   const pending = pendingPriceConfirm;
   pendingPriceConfirm = null;
   const modal = $('price-confirm-modal');
@@ -2031,6 +2176,7 @@ function closeIncomeEditor() {
 }
 
 async function handleIncomeSave() {
+  assertReadOnly('handleIncomeSave');
   const uid = currentUser ? currentUser.id : null;
   if (!uid) { showBanner('未登录，无法保存', 'error'); return; }
   const activeTypeBtn = document.querySelector('#income-type .seg-item.active');
@@ -2072,6 +2218,7 @@ async function handleIncomeSave() {
 }
 
 async function handleIncomeDelete() {
+  assertReadOnly('handleIncomeDelete');
   const uid = currentUser ? currentUser.id : null;
   if (!uid || !editingIncomeId) return;
   if (!window.confirm('确定删除这条收入记录吗？（软删除，可恢复）')) return;
@@ -2088,6 +2235,552 @@ async function handleIncomeDelete() {
   await loadIncomeRecords();
   renderIncomeRecords();
   closeIncomeEditor();
+}
+
+/* ---------- 13b. 账号计件模块（三运营账号独立计件） ----------
+ * 数据层：新增两张独立表 account_piecework_daily / account_price_history（迁移 10），
+ *   复用 income_records 的「user_id + upsert + deleted_at 软删」干净模式（不碰 daily_records 旧路径）。
+ * 金额：整数元（数量 × 单价快照），无任何浮点；防双算由 recordGross/computeSalary 的 E 闸门统一负责。
+ * 与 macOS 端 AccountPieceworkEngine 完全同口径（同 3 账号 / 同取价 / 同快照 / 同接管）。 */
+/* 最终五项口径（§一 / §五）：3 账号 × 各自允许的计件类型 = 5 项。
+ * 账号 ID / content_type / 数量列 / 价格键与 Mac AccountPieceworkEngine.items、
+ * Supabase 迁移 11 完全一致。抖音只有单一 publish_count，绝不拆成 note/video 双算。 */
+const PW_ACCOUNTS = [
+  { code: 'xiaohongshu_sam',    name: '小红书 SAM',   platform: '小红书', content: ['note', 'video'] },
+  { code: 'xiaohongshu_beebag', name: '小红书 BeeBag', platform: '小红书', content: ['note', 'video'] },
+  { code: 'douyin_sam',         name: '抖音 SAM',     platform: '抖音',   content: ['publish'] }
+];
+const PW_CONTENT_LABEL = { note: '图文笔记', video: '视频', publish: '发布数量' };
+const PW_COUNT_FIELD = { note: 'note_count', video: 'video_count', publish: 'publish_count' };
+const PW_PRICE_FIELD = {
+  note: 'note_unit_price_snapshot',
+  video: 'video_unit_price_snapshot',
+  publish: 'publish_unit_price_snapshot'
+};
+// 五项默认单价（初始配置值，可在计价设置里逐项修改；不是写死在计算中的常量）
+const PW_DEFAULT_PRICES = {
+  'xiaohongshu_sam|note': 5, 'xiaohongshu_sam|video': 31,
+  'xiaohongshu_beebag|note': 4, 'xiaohongshu_beebag|video': 30,
+  'douyin_sam|publish': 4
+};
+const PW_ITEMS = (function () {
+  const out = [];
+  for (const a of PW_ACCOUNTS) {
+    for (const ct of a.content) {
+      out.push({
+        account: a.code, name: a.name, platform: a.platform, content: ct,
+        key: a.code + '|' + ct,
+        label: a.name + ' · ' + PW_CONTENT_LABEL[ct]
+      });
+    }
+  }
+  return out;
+})();
+function pwItemKey(account, content) { return account + '|' + content; }
+function pwAllowedContent(account) {
+  const a = PW_ACCOUNTS.find((x) => x.code === account);
+  return a ? a.content : [];
+}
+const PIECEWORK_TAKEOVER_FROM_KEY = 'piecework_effective_from';
+
+let accountPiecework = [];   // account_piecework_daily 镜像（仅未删）
+let accountPrices = [];      // account_price_history 镜像（仅未删）
+let pieceworkEntryCounts = {}; // 录入页暂存：item.key -> 数量
+let pwStatMonth = (function () { return todayStr().slice(0, 7); })();
+
+function recomputePieceworkEffectiveFrom() {
+  const dates = accountPrices.filter((p) => !p.deleted_at).map((p) => p.effective_from).sort();
+  pieceworkEffectiveFrom = dates.length ? dates[0] : null;
+  try { if (pieceworkEffectiveFrom) localStorage.setItem(PIECEWORK_TAKEOVER_FROM_KEY, pieceworkEffectiveFrom); }
+  catch (_) {}
+}
+
+// 某账号/内容在某业务日生效单价；无生效记录 → null（「未设置」）。镜像 Mac AccountPieceworkEngine.priceAt。
+function pieceworkPriceAt(account, content, date) {
+  const valid = accountPrices.filter((p) => !p.deleted_at && p.account_code === account && p.content_type === content);
+  const active = valid.filter((p) => p.effective_from <= date).sort((a, b) => (a.effective_from < b.effective_from ? -1 : 1));
+  if (active.length) return active[active.length - 1].unit_price;
+  const earliest = valid.slice().sort((a, b) => (a.effective_from < b.effective_from ? -1 : 1))[0];
+  return earliest ? earliest.unit_price : null;
+}
+
+// 单条记录金额：只累加该账号 allowedContent 内的类型（抖音只 publish；小红书只 note+video）。
+// 从结构上杜绝「抖音 publish 被当成 note + video 双算」以及与旧视频/图文金额重复累计（§四 / §五）。
+function pwRecordAmount(r) {
+  let sum = 0;
+  for (const ct of pwAllowedContent(r.account_code)) {
+    sum += num(r[PW_COUNT_FIELD[ct]]) * num(r[PW_PRICE_FIELD[ct]]);
+  }
+  return sum;
+}
+
+// 某日三账号五项计件金额合计（已删不计）。镜像 Mac AccountPieceworkEngine.dailyAmount。
+function pieceworkDailyAmount(date) {
+  let sum = 0;
+  for (const r of accountPiecework) {
+    if (r.deleted_at) continue;
+    if (r.business_date === date) sum += pwRecordAmount(r);
+  }
+  return sum;
+}
+
+// 某日、某项的数量 / 金额（供每日合计逐项展示，§六）。
+function pwItemDaily(item, date) {
+  let count = 0, amount = 0;
+  for (const r of accountPiecework) {
+    if (r.deleted_at || r.business_date !== date || r.account_code !== item.account) continue;
+    const c = num(r[PW_COUNT_FIELD[item.content]]);
+    count += c;
+    amount += c * num(r[PW_PRICE_FIELD[item.content]]);
+  }
+  return { count: count, amount: amount };
+}
+
+// 某月、某项的数量 / 金额（按账号 + 类型分别汇总，§六）。
+function pwItemMonthly(item, month) {
+  let count = 0, amount = 0;
+  for (const r of accountPiecework) {
+    if (r.deleted_at || String(r.business_date).slice(0, 7) !== month || r.account_code !== item.account) continue;
+    const c = num(r[PW_COUNT_FIELD[item.content]]);
+    count += c;
+    amount += c * num(r[PW_PRICE_FIELD[item.content]]);
+  }
+  return { count: count, amount: amount };
+}
+
+// §六「加入其他现有工资项目后的当天工资总额」。
+// 复用 recordTotal（内含日期闸门）：E 之前旧图文/视频照旧；E 及之后由五项计件接管，绝不双算。
+function pwDailyWageTotal(date) {
+  try {
+    const r = (typeof records !== 'undefined' && records)
+      ? records.find((x) => x.date === date && !x.deleted_at) : null;
+    if (r) return recordTotal(r);
+  } catch (_) { /* 记录尚未加载 */ }
+  return pieceworkDailyAmount(date);
+}
+
+async function loadAccountPiecework() {
+  const uid = currentUser ? currentUser.id : null;
+  if (!uid) { accountPiecework = []; return; }
+  // 先合并本地已提交镜像（离线录入也已落本地，刷新/重开不丢）
+  let localRows = [];
+  try { localRows = await LocalDB.getAllPiecework(uid); } catch (_) { localRows = []; }
+  const merged = new Map();
+  for (const r of localRows) {
+    if (!r.deleted_at) merged.set(r.business_date + '|' + r.account_code, r);
+  }
+  try {
+    const { data, error } = await sb.from('account_piecework_daily')
+      .select('*').eq('user_id', uid).is('deleted_at', null).order('business_date', { ascending: false });
+    if (error) { console.warn('账号计件读取失败', error.message); }
+    else {
+      for (const r of (data || [])) merged.set(r.business_date + '|' + r.account_code, r);
+    }
+  } catch (_) { /* 离线：保留本地镜像 */ }
+  accountPiecework = Array.from(merged.values());
+}
+
+async function loadAccountPrices() {
+  const uid = currentUser ? currentUser.id : null;
+  if (!uid) { accountPrices = []; recomputePieceworkEffectiveFrom(); return; }
+  try {
+    const { data, error } = await sb.from('account_price_history')
+      .select('*').eq('user_id', uid).order('effective_from', { ascending: false });
+    if (error) { console.warn('账号计价读取失败', error.message); }
+    else { accountPrices = data || []; }
+  } catch (_) { /* 离线：保留 */ }
+  recomputePieceworkEffectiveFrom();
+}
+
+async function pushPiecework(rows) {
+  assertReadOnly('pushPiecework');
+  if (!rows.length) return false;
+  const { error } = await sb.from('account_piecework_daily')
+    .upsert(rows, { onConflict: 'user_id,business_date,account_code' });
+  if (error) { showBanner('账号计件保存失败：' + (error.message || ''), 'error'); return false; }
+  return true;
+}
+
+async function pushAccountPrices(rows) {
+  assertReadOnly('pushAccountPrices');
+  if (!rows.length) return false;
+  const { error } = await sb.from('account_price_history')
+    .upsert(rows, { onConflict: 'user_id,account_code,content_type,effective_from' });
+  if (error) { showBanner('账号计价保存失败：' + (error.message || ''), 'error'); return false; }
+  return true;
+}
+
+/* —— 录入页 —— */
+function pwEntryDate() { return ($('pw-date') && $('pw-date').value) || todayStr(); }
+
+function renderPiecework() {
+  if (!$('pw-date').value) $('pw-date').value = todayStr();
+  if (!$('pw-stat-date').value) $('pw-stat-date').value = todayStr();
+  $('pw-month-label').textContent = pwStatMonth + '月';
+  renderPieceworkEntry();
+  renderPieceworkStats();
+  updatePieceworkSyncStatus();
+}
+
+function renderPieceworkEntry() {
+  const date = pwEntryDate();
+  const active = isPieceworkActive(date);
+  const banner = $('pw-eff-banner');
+  if (banner) {
+    if (!pieceworkEffectiveFrom) {
+      banner.textContent = '⚠️ 尚未初始化账号计价，请点右上角「计价设置」设置 5 个单价与生效日期。';
+      banner.classList.remove('hidden');
+    } else if (active) {
+      banner.textContent = '✅ 计价生效日 ' + pieceworkEffectiveFrom + ' 起：五项计件接管旧视频/图文发布计价（与旧体系不双算）。抖音只有 1 个发布数量。';
+      banner.classList.remove('hidden');
+    } else {
+      banner.textContent = '⚠️ 该业务日早于生效日，由旧体系负责，本模块仅作历史展示。';
+      banner.classList.remove('hidden');
+    }
+  }
+  // 从已保存记录回填五项数量（每个账号每天一条，按 item.key 独立读取）
+  pieceworkEntryCounts = {};
+  for (const item of PW_ITEMS) {
+    const rec = accountPiecework.find((r) => !r.deleted_at && r.business_date === date && r.account_code === item.account);
+    pieceworkEntryCounts[item.key] = rec ? num(rec[PW_COUNT_FIELD[item.content]]) : 0;
+  }
+  renderPieceworkAccounts();
+  updatePieceworkTotals();
+}
+
+// 每个账号只渲染自己的 allowedContent 输入项：小红书 2 项，抖音只有 1 项「发布数量」。
+function renderPieceworkAccounts() {
+  const box = $('pw-accounts');
+  if (!box) return;
+  const date = pwEntryDate();
+  let html = '';
+  for (const a of PW_ACCOUNTS) {
+    let inputHtml = '', priceHtml = '', amtHtml = '', total = 0;
+    for (const ct of a.content) {
+      const key = pwItemKey(a.code, ct);
+      const price = pieceworkPriceAt(a.code, ct, date);
+      const c = pieceworkEntryCounts[key] || 0;
+      const amt = c * (price || 0);
+      total += amt;
+      inputHtml += '<label class="pw-count">' + PW_CONTENT_LABEL[ct] + '数量' +
+        '<input id="pw-c-' + a.code + '-' + ct + '" type="number" min="0" inputmode="numeric" value="' + c + '"></label>';
+      priceHtml += '<span>' + PW_CONTENT_LABEL[ct] + '单价：' +
+        (price === null ? '<i class="pw-unset">未设置 ⚠️</i>' : '<b>' + price + '</b> 元') + '</span>';
+      amtHtml += '<span id="pw-amt-' + a.code + '-' + ct + '">' + PW_CONTENT_LABEL[ct] + '金额：' + amt + '</span>';
+    }
+    html +=
+      '<div class="pw-acc-card">' +
+        '<div class="pw-acc-head"><b>' + a.name + '</b><span class="pw-acc-sub">' + a.platform + '</span></div>' +
+        '<div class="pw-grid2">' + inputHtml + '</div>' +
+        '<div class="pw-acc-prices">' + priceHtml + '</div>' +
+        '<div class="pw-acc-amounts">' + amtHtml +
+          '<span class="pw-acc-total" id="pw-acc-total-' + a.code + '">账号合计：' + total + '</span>' +
+        '</div>' +
+      '</div>';
+  }
+  box.innerHTML = html;
+  for (const item of PW_ITEMS) {
+    const el = $('pw-c-' + item.account + '-' + item.content);
+    if (!el) continue;
+    el.addEventListener('input', () => {
+      pieceworkEntryCounts[item.key] = num(el.value);
+      updatePieceworkTotals();
+    });
+  }
+}
+
+// 每日合计（§六）：五项金额逐项 + 五项总额 + 加入其他工资项目后的当天工资总额。
+function updatePieceworkTotals() {
+  const date = pwEntryDate();
+  let amt = 0, blocked = [];
+  const lines = [];
+  for (const item of PW_ITEMS) {
+    const c = pieceworkEntryCounts[item.key] || 0;
+    const price = pieceworkPriceAt(item.account, item.content, date);
+    if (c > 0 && price === null) blocked.push(item.label);
+    const a = c * (price || 0);
+    amt += a;
+    lines.push('<div class="pw-totals-row"><span>' + item.label + '金额</span><b>' + a + ' 元</b></div>');
+    const span = $('pw-amt-' + item.account + '-' + item.content);
+    if (span) span.textContent = PW_CONTENT_LABEL[item.content] + '金额：' + a;
+  }
+  for (const a of PW_ACCOUNTS) {
+    let t = 0;
+    for (const ct of a.content) {
+      const c = pieceworkEntryCounts[pwItemKey(a.code, ct)] || 0;
+      t += c * (pieceworkPriceAt(a.code, ct, date) || 0);
+    }
+    const el = $('pw-acc-total-' + a.code);
+    if (el) el.textContent = '账号合计：' + t;
+  }
+  const box = $('pw-totals');
+  if (box) {
+    box.innerHTML =
+      lines.join('') +
+      '<div class="pw-totals-row pw-acc-total"><span>五项计件金额总额</span><b>' + amt + ' 元</b></div>' +
+      '<div class="pw-totals-row pw-acc-total"><span>加入其他现有工资项目后的当天工资总额</span><b>' + pwDailyWageTotal(date) + ' 元</b></div>' +
+      '<div class="hint">出单 / 退款 / 助播 / 素材按原有规则；生效日起旧视频·图文发布金额由五项计件接管，不重复累计。</div>' +
+      (blocked.length ? '<div class="pw-blocked">⚠️ 以下项有数量但单价未设置，已阻止保存：' + blocked.join('、') + '</div>' : '');
+  }
+  const saveBtn = $('pw-save');
+  if (saveBtn) saveBtn.disabled = blocked.length > 0;
+}
+
+async function savePieceworkDay() {
+  assertReadOnly('savePieceworkDay');
+  const uid = currentUser ? currentUser.id : null;
+  if (!uid) { showBanner('未登录，无法保存', 'error'); return; }
+  const date = pwEntryDate();
+  if (!isPieceworkActive(date)) { showBanner('该业务日不在计件生效范围内，无需保存', 'warn'); return; }
+  const now = nowISO();
+  const rows = [];
+  let blocked = [];
+  for (const a of PW_ACCOUNTS) {
+    const existing = accountPiecework.find((r) => !r.deleted_at && r.business_date === date && r.account_code === a.code);
+    // 五个数量列 / 五个快照列同存；非本账号允许的类型恒为 0
+    // （抖音行绝不出现 note/video 数量，publish 不伪装成 graphic/video，§五）。
+    const row = {
+      id: existing ? existing.id : (window.crypto && crypto.randomUUID ? crypto.randomUUID() : ('pw-' + Date.now() + '-' + Math.random().toString(16).slice(2))),
+      user_id: uid,
+      business_date: date,
+      account_code: a.code,
+      note_count: 0, video_count: 0, publish_count: 0,
+      note_unit_price_snapshot: 0, video_unit_price_snapshot: 0, publish_unit_price_snapshot: 0,
+      created_at: existing ? existing.created_at : now,
+      updated_at: now
+    };
+    let bad = false;
+    for (const ct of a.content) {
+      const c = pieceworkEntryCounts[pwItemKey(a.code, ct)] || 0;
+      const price = pieceworkPriceAt(a.code, ct, date);
+      if (c > 0 && price === null) { bad = true; break; }  // 未设置 → 阻止，绝不按 0 计费
+      row[PW_COUNT_FIELD[ct]] = c;
+      row[PW_PRICE_FIELD[ct]] = price || 0;
+    }
+    if (bad) { blocked.push(a.name); continue; }
+    rows.push(row);
+  }
+  if (blocked.length) { showBanner('已阻止保存：' + blocked.join('、') + ' 单价未设置', 'error'); return; }
+
+  // 1) 立即写入本地已提交镜像（离线也不丢，刷新/重开仍可见）
+  for (const r of rows) {
+    try { await LocalDB.putPiecework(Object.assign({}, r, { deleted_at: null })); } catch (_) {}
+  }
+  // 2) 合并进内存，UI 立即反映
+  const merged = new Map(accountPiecework.map((r) => [r.business_date + '|' + r.account_code, r]));
+  for (const r of rows) merged.set(r.business_date + '|' + r.account_code, r);
+  accountPiecework = Array.from(merged.values());
+
+  // 3) 尝试云端（失败不致命：入独立 outbox，联网后自动补推）
+  let err = null;
+  try { err = await pushPiecework(rows); } catch (e) { err = e; }
+  if (err) {
+    for (const r of rows) {
+      try {
+        await LocalDB.putPieceworkPending({
+          kind: 'piecework', date: r.business_date, account: r.account_code, action: 'save',
+          payload: r, createdAt: nowISO()
+        });
+      } catch (_) {}
+    }
+    showBanner('已保存到本地（离线或同步失败），联网后将自动同步', 'warn');
+    renderPieceworkEntry();
+    updatePieceworkSyncStatus();
+    return;
+  }
+  // 成功：清除该日期可能残留的待同步项
+  for (const r of rows) { try { await LocalDB.deletePieceworkPendingByKey(r.business_date, r.account_code); } catch (_) {} }
+  await loadAccountPiecework();
+  renderPieceworkEntry();
+  updatePieceworkSyncStatus();
+  showBanner('已保存 ' + rows.length + ' 个账号计件记录', 'ok');
+}
+
+/* —— 计价设置 Sheet —— */
+function openPieceworkPriceSheet() {
+  renderPieceworkPriceSheet();
+  $('pw-price-sheet').classList.remove('hidden');
+}
+function closePieceworkPriceSheet() { $('pw-price-sheet').classList.add('hidden'); }
+
+function renderPieceworkPriceSheet() {
+  const body = $('pw-price-body');
+  if (!body) return;
+  const effDefault = pieceworkEffectiveFrom || todayStr();
+  let html = '<div class="field"><label>新价格生效日期（含当天）</label><input id="pw-eff" type="date" value="' + effDefault + '"></div>';
+  html += '<div class="hint">只展示 5 个单价。留空 = 保持「未设置」（绝不禁锢为 0 元）；填 0 = 用户明确设为 0 元。' +
+    'E 固定为 ' + (pieceworkEffectiveFrom || '未设置') + '，改价不会追溯改变历史金额。</div>';
+  for (const item of PW_ITEMS) {
+    const cur = pieceworkPriceAt(item.account, item.content, effDefault);
+    const def = Object.prototype.hasOwnProperty.call(PW_DEFAULT_PRICES, item.key) ? PW_DEFAULT_PRICES[item.key] : '';
+    const initial = cur === null ? def : cur;
+    html += '<label class="pw-count">' + item.label + '单价' +
+      '<input id="pw-p-' + item.account + '-' + item.content + '" type="number" min="0" inputmode="numeric" placeholder="未设置" value="' + initial + '"></label>';
+  }
+  const sorted = accountPrices.filter((p) => !p.deleted_at).slice().sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1));
+  html += '<div class="section-title">历史调价记录</div>';
+  if (!sorted.length) html += '<div class="empty">暂无历史</div>';
+  else {
+    for (const p of sorted) {
+      const an = (PW_ACCOUNTS.find((x) => x.code === p.account_code) || { name: p.account_code }).name;
+      const ct = PW_CONTENT_LABEL[p.content_type] || p.content_type;
+      html += '<div class="pw-hist-row">' + an + ' · ' + ct + ' · ' + p.effective_from + ' 起 · <b>' + p.unit_price + '</b> 元/条</div>';
+    }
+  }
+  body.innerHTML = html;
+}
+
+async function saveAccountPrices() {
+  assertReadOnly('saveAccountPrices');
+  const uid = currentUser ? currentUser.id : null;
+  if (!uid) { showBanner('未登录，无法保存', 'error'); return; }
+  const eff = ($('pw-eff') && $('pw-eff').value) || todayStr();
+  const rows = [];
+  for (const item of PW_ITEMS) {
+    const el = $('pw-p-' + item.account + '-' + item.content);
+    if (!el || el.value === '') continue; // 未填 = 不写该条（保留「未设置」语义；显式 0 仍可写）
+    rows.push({
+      id: (window.crypto && crypto.randomUUID ? crypto.randomUUID() : ('pwpr-' + Date.now() + '-' + Math.random().toString(16).slice(2))),
+      user_id: uid,
+      account_code: item.account,
+      content_type: item.content,
+      unit_price: num(el.value),
+      effective_from: eff,
+      created_at: nowISO(),
+      updated_at: nowISO()
+    });
+  }
+  if (!rows.length) { showBanner('请至少填写一个单价（留空=保持未设置；填 0=显式设为 0 元）', 'warn'); return; }
+
+  // 1) 立即写入本地镜像（价格历史以 effective_from 为维度；离线也保留）
+  for (const r of rows) { try { await LocalDB.putPiecework(Object.assign({}, r, { pw_key: 'price|' + r.account_code + '|' + r.content_type + '|' + r.effective_from })); } catch (_) {} }
+
+  // 2) 尝试云端（失败入独立 outbox）
+  let err = null;
+  try { err = await pushAccountPrices(rows); } catch (e) { err = e; }
+  if (err) {
+    try {
+      await LocalDB.putPieceworkPending({
+        kind: 'price', date: eff, account: null, action: 'price',
+        payload: { rows, eff }, createdAt: nowISO()
+      });
+    } catch (_) {}
+    showBanner('计价已存本地（离线或同步失败），联网后将自动同步', 'warn');
+    updatePieceworkSyncStatus();
+    return;
+  }
+  // 成功：清除该生效日的计价待同步项
+  try { await LocalDB.deletePieceworkPendingByKey(eff, null); } catch (_) {}
+  await loadAccountPrices();   // 重算 E
+  renderPieceworkEntry();
+  closePieceworkPriceSheet();
+  updatePieceworkSyncStatus();
+  showBanner('已写入 ' + rows.length + ' 条单价（生效日 ' + eff + '）', 'ok');
+}
+
+/* —— 离线队列补推（独立 outbox，不混入 daily_records 的 flushPending）——
+ * 联网恢复/启动/定时时调用：按 createdAt 顺序补推 piecework / price 待同步项；
+ * 成功一条删一条；失败停止保留队列（下次重试）。同一 (date,account) 用 onConflict upsert，
+ * 重复提交不会生成两条计费记录（唯一约束兜底，绝不重复计费）。 */
+let isPieceworkFlushing = false;
+
+async function flushPieceworkPending() {
+  assertReadOnly('flushPieceworkPending');
+  if (isPieceworkFlushing || !navigator.onLine) return;
+  if (!currentUser) return;
+  isPieceworkFlushing = true;
+  try {
+    const pending = await LocalDB.getAllPieceworkPending();
+    if (!pending.length) return;
+    // 核心补推逻辑委托给 PieceworkSync.flush（单一真相源，可在 Node 中用 mock 单测）
+    await PieceworkSync.flush({
+      items: pending,
+      upsertPiecework: pushPiecework,
+      upsertPrices: pushAccountPrices,
+      onSuccess: async (entry) => {
+        try { await LocalDB.deletePieceworkPending(entry.id); } catch (_) {}
+        try { if (entry.date && entry.account) await LocalDB.deletePieceworkPendingByKey(entry.date, entry.account); } catch (_) {}
+        logPush({ date: entry.date, assist: entry.account, payload: 'pw-replay', session: sessState(), result: 'success', error: '-' });
+      },
+      onFail: (entry, err) => {
+        logPush({ date: entry.date, assist: entry.account, payload: 'pw-replay', session: sessState(), result: 'failed', error: (err && err.message) || String(err) });
+      },
+      onConflict: (entry) => {
+        logPush({ date: entry.date, assist: entry.account, payload: 'pw-replay', session: sessState(), result: 'conflict', error: '服务端存在更新版本，已保留本地且不静默覆盖' });
+      }
+    });
+    // 补推后刷新本地/云端镜像，使 UI 显示权威数据
+    try { await loadAccountPiecework(); await loadAccountPrices(); } catch (_) {}
+  } finally {
+    isPieceworkFlushing = false;
+    updatePieceworkSyncStatus();
+  }
+}
+
+// 计件同步状态显示：在线/离线 + 待同步 N 条（独立于 daily_records 的 sync-status）
+async function updatePieceworkSyncStatus() {
+  const el = $('pw-sync-status');
+  if (!el) return;
+  let n = 0;
+  try { n = (await LocalDB.getAllPieceworkPending()).length; } catch (_) {}
+  // U4：只读查看端 —— 遗留数量仅供展示，绝不显示「自动补推 / 已同步」。
+  if (!navigator.onLine) {
+    el.textContent = '离线 · 只读' + (n ? '（遗留 ' + n + ' 条，请在电脑端处理）' : '');
+    el.className = 'sync-status offline';
+  } else if (n) {
+    el.textContent = '遗留 ' + n + ' 条已隔离 · 只读';
+    el.className = 'sync-status readonly-offline';
+  } else {
+    el.textContent = '只读 · 无待上传';
+    el.className = 'sync-status readonly-ok';
+  }
+}
+
+/* —— 统计页 —— */
+function renderPieceworkStats() {
+  renderPieceworkDailyTable($('pw-stat-date').value || todayStr());
+  renderPieceworkMonthlyTable(pwStatMonth);
+}
+
+// 每日统计按「账号 + 类型 + 金额」分别汇总（§六）。
+function renderPieceworkDailyTable(date) {
+  const box = $('pw-daily-table');
+  if (!box) return;
+  let html = '<div class="pw-table-head"><span>账号</span><span>计件类型</span><span>数量</span><span>金额</span></div>';
+  let total = 0;
+  for (const item of PW_ITEMS) {
+    const d = pwItemDaily(item, date);
+    total += d.amount;
+    html += '<div class="pw-table-row"><span>' + item.name + '</span><span>' + PW_CONTENT_LABEL[item.content] +
+      '</span><span>' + d.count + '</span><span class="pw-acc-total">' + d.amount + ' 元</span></div>';
+  }
+  html += '<div class="pw-table-foot"><span>五项计件金额总额</span><span></span><span></span><span class="pw-acc-total">' + total + ' 元</span></div>';
+  html += '<div class="pw-table-foot"><span>当天工资总额（含其他工资项目）</span><span></span><span></span><span class="pw-acc-total">' + pwDailyWageTotal(date) + ' 元</span></div>';
+  box.innerHTML = html;
+}
+
+function pwStepMonth(d) {
+  const parts = pwStatMonth.split('-').map(Number);
+  const dt = new Date(parts[0], parts[1] - 1 + d, 1);
+  pwStatMonth = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+  $('pw-month-label').textContent = pwStatMonth + '月';
+  renderPieceworkMonthlyTable(pwStatMonth);
+}
+
+// 月度统计按「账号 + 类型 + 金额」分别汇总（§六）。
+function renderPieceworkMonthlyTable(month) {
+  const box = $('pw-monthly-table');
+  if (!box) return;
+  let html = '<div class="pw-table-head"><span>账号</span><span>计件类型</span><span>总数量</span><span>金额</span></div>';
+  let tAmt = 0;
+  for (const item of PW_ITEMS) {
+    const m = pwItemMonthly(item, month);
+    tAmt += m.amount;
+    html += '<div class="pw-table-row"><span>' + item.name + '</span><span>' + PW_CONTENT_LABEL[item.content] +
+      '</span><span>' + m.count + '</span><span class="pw-acc-total">' + m.amount + ' 元</span></div>';
+  }
+  html += '<div class="pw-table-foot"><span>五项计件金额总额</span><span></span><span></span><span class="pw-acc-total">' + tAmt + ' 元</span></div>';
+  box.innerHTML = html;
 }
 
 /* ---------- 13. 事件绑定 ---------- */
@@ -2204,6 +2897,19 @@ function bindEvents() {
     if ($('today-view').classList.contains('active')) handleTodaySave();
   });
 
+  // U4：历史页只读日期查询（复用既有 loadRecords / renderHistory，不新增计算逻辑）。
+  const hQueryBtn = $('h-query-btn');
+  if (hQueryBtn) hQueryBtn.addEventListener('click', async () => {
+    const qd = $('h-query-date') && $('h-query-date').value;
+    try { await loadRecords(); } catch (_) {}
+    renderHistory();
+    const res = $('h-query-result');
+    if (res) {
+      const rec = qd ? records.find((r) => r.date === qd) : null;
+      res.textContent = rec ? (qd + ' · 当日合计 ' + fmtMoney(recordTotal(rec)) + '（只读查询）')
+        : ((qd || '未选择日期') + ' · 无匹配记录（只读查询）');
+    }
+  });
   $('sal-calc').addEventListener('click', handleSalaryCalc);
   document.querySelectorAll('.quick-range .chip').forEach((c) =>
     c.addEventListener('click', () => applyQuickRange(c.dataset.range)));
@@ -2229,16 +2935,43 @@ function bindEvents() {
     const row = e.target.closest('[data-id]');
     if (row) openIncomeEditor(row.dataset.id);
   });
+
+  // 账号计件模块（13b）
+  const pwDate = $('pw-date'); if (pwDate) pwDate.addEventListener('change', renderPieceworkEntry);
+  const pwSave = $('pw-save'); if (pwSave) pwSave.addEventListener('click', savePieceworkDay);
+  const pwSettingsBtn = $('pw-settings-btn'); if (pwSettingsBtn) pwSettingsBtn.addEventListener('click', openPieceworkPriceSheet);
+  const pwPriceCancel = $('pw-price-cancel'); if (pwPriceCancel) pwPriceCancel.addEventListener('click', closePieceworkPriceSheet);
+  const pwPriceBackdrop = $('pw-price-backdrop'); if (pwPriceBackdrop) pwPriceBackdrop.addEventListener('click', closePieceworkPriceSheet);
+  const pwPriceSave = $('pw-price-save'); if (pwPriceSave) pwPriceSave.addEventListener('click', saveAccountPrices);
+  document.querySelectorAll('#pw-seg .seg-item').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('#pw-seg .seg-item').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active');
+    const m = b.dataset.mode;
+    $('pw-entry').classList.toggle('hidden', m !== 'entry');
+    $('pw-stats').classList.toggle('hidden', m !== 'stats');
+  }));
+  document.querySelectorAll('#pw-stat-seg .seg-item').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('#pw-stat-seg .seg-item').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active');
+    const m = b.dataset.smode;
+    $('pw-stat-daily').classList.toggle('hidden', m !== 'daily');
+    $('pw-stat-monthly').classList.toggle('hidden', m !== 'monthly');
+  }));
+  const pwStatDate = $('pw-stat-date'); if (pwStatDate) pwStatDate.addEventListener('change', () => renderPieceworkDailyTable(pwStatDate.value || todayStr()));
+  const pwMonthPrev = $('pw-month-prev'); if (pwMonthPrev) pwMonthPrev.addEventListener('click', () => pwStepMonth(-1));
+  const pwMonthNext = $('pw-month-next'); if (pwMonthNext) pwMonthNext.addEventListener('click', () => pwStepMonth(1));
 }
 
 /* ---------- 14. 启动 ---------- */
 window.addEventListener('DOMContentLoaded', async () => {
   bindEvents();
   // 网络状态监听：恢复网络自动补推，离线即时更新状态
-  window.addEventListener('online', () => { updateSyncStatus(); flushPending(); });
-  window.addEventListener('offline', () => { updateSyncStatus(); });
+  // U4：online 仅刷新只读状态，绝不补推。
+  window.addEventListener('online', () => { updateSyncStatus(); renderSyncStatusPage(); updatePieceworkSyncStatus(); });
+  window.addEventListener('offline', () => { updateSyncStatus(); updatePieceworkSyncStatus(); });
   await tryRestoreSession();
   updateSyncStatus();
+  renderSyncStatusPage();
   // 注册 Service Worker（PWA 离线壳）
   if ('serviceWorker' in navigator) {
     try {

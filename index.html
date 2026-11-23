@@ -17,14 +17,14 @@
 
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="readonly-mode">
 
   <!-- ============ 登录页 ============ -->
   <section id="login-view" class="login-view">
     <div class="login-card">
       <div class="login-logo">¥</div>
       <h1>总账 Ledger</h1>
-      <p class="login-sub">登录你的账号以同步记录</p>
+      <p class="login-sub">手机端只读查看 · 登录以查看本地缓存</p>
       <form id="login-form" autocomplete="on">
         <input id="email" type="email" inputmode="email" placeholder="邮箱" autocomplete="username" required />
         <input id="password" type="password" placeholder="密码" autocomplete="current-password" required />
@@ -42,7 +42,7 @@
       <!-- 同步状态胶囊（#sync-status）：绝对定位的 top-left 胶囊。
            必须是 .topbar 的直接子级 —— 若留在 .nav-meta 内，定位祖先是仅 32px 宽的
            .nav-meta，胶囊会被挤到右侧压住 #account-btn，导致账户按钮点不到。 -->
-      <span id="sync-status" class="sync-status" role="button" tabindex="0" title="点击立即同步">…</span>
+      <span id="sync-status" class="sync-status" role="button" tabindex="0" title="点击刷新（只读）">只读</span>
       <!-- 日期模式（今日页） -->
       <div class="nav-datemode" id="nav-datemode">
         <button id="nav-prev" class="nav-arrow" aria-label="前一天">‹</button>
@@ -134,55 +134,54 @@
           <div class="net-sub">今日 <b id="s-net">0</b> 笔</div>
         </div>
 
-        <!-- 数据录入（真实 7 字段，顺序不变：小红书→抖音→退款→助播→图文→素材→视频） -->
-        <div class="section-title">数据录入</div>
-        <div class="card entry-card">
-          <div class="entry-row">
-            <span class="f-ic" style="background:#E4B6B0"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 4v16"/></svg></span>
-            <span class="f-name">小红书出单</span>
-            <input id="t-xhs" type="number" inputmode="numeric" min="0" placeholder="0" />
+        <!-- 最终工资规则：每日录入严格 11 项（2026-11-04 确认口径）。
+             顺序与 macOS FinalWageField.allCases 完全一致；抖音不记录退款；
+             第 11 项日工资总额为只读计算列。 -->
+        <div class="section-title">数据录入 · 11 项</div>
+        <div class="card fw-entry-card">
+          <div class="fw-entry-head">
+            <span>序号</span><span>字段</span><span>数量 / 金额</span><span>单价</span>
           </div>
-          <div class="entry-row">
-            <span class="f-ic" style="background:#6B6B70"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg></span>
-            <span class="f-name">抖音出单</span>
-            <input id="t-dy" type="number" inputmode="numeric" min="0" placeholder="0" />
+          <div id="fw-entry-rows"></div>
+          <div class="fw-entry-foot">
+            <span>11. 日工资总额（元）</span>
+            <b id="fw-daily-total">¥0</b>
           </div>
-          <div class="entry-row">
-            <span class="f-ic" style="background:#E6C49E"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7"/></svg></span>
-            <span class="f-name">退款</span>
-            <input id="t-refund" type="number" inputmode="numeric" min="0" placeholder="0" />
-          </div>
-          <div class="entry-row" id="row-t-assist">
-            <span class="f-ic" style="background:#AECBBB"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>
-            <span class="f-name">助播</span>
-            <input id="t-assist" type="number" inputmode="numeric" min="0" placeholder="0" />
-          </div>
-          <div class="entry-row">
-            <span class="f-ic" style="background:#B2C9E9"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg></span>
-            <span class="f-name">图文</span>
-            <input id="t-note" type="number" inputmode="numeric" min="0" placeholder="0" />
-          </div>
-          <div class="entry-row">
-            <span class="f-ic" style="background:#B9D2D6"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg></span>
-            <span class="f-name">素材</span>
-            <input id="t-material" type="number" inputmode="numeric" min="0" placeholder="0" />
-          </div>
-          <div class="entry-row">
-            <span class="f-ic" style="background:#CBB8DE"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7 4 19 12 7 20 7 4"/></svg></span>
-            <span class="f-name">视频</span>
-            <input id="t-video" type="number" inputmode="numeric" min="0" placeholder="0" />
-          </div>
+          <div id="fw-entry-hint" class="hint"></div>
         </div>
 
-        <button id="t-save" class="btn-primary">保存记录</button>
+        <!-- 兼容层：app.js 既有保存/同步链路仍读这些 id（字段级 LWW / 草稿 / 离线队列）。
+             11 项主表输入会同步写回这里，旧逻辑零改动、零回归；对用户界面隐藏。 -->
+        <div id="fw-compat" class="hidden" aria-hidden="true">
+          <input id="t-xhs" type="number" value="0" />
+          <input id="t-dy" type="number" value="0" />
+          <input id="t-refund" type="number" value="0" />
+          <input id="t-assist" type="number" value="0" />
+          <input id="t-note" type="number" value="0" />
+          <input id="t-material" type="number" value="0" />
+          <input id="t-video" type="number" value="0" />
+          <div id="row-t-assist"></div>
+        </div>
+
+        <button id="t-save" class="ro-write btn-primary">保存记录</button>
         <div id="t-status" class="hint"></div>
 
       </section>
 
-      <!-- ---------- 历史 ---------- -->
+      <!-- ---------- 历史（U4：只读查看每日经营数据 + 助播收入 + 日期查询）---------- -->
       <section id="history-view" class="view">
-        <div id="history-list" class="history-list"></div>
+        <div class="ro-query-bar">
+          <label for="h-query-date">日期查询（只读）</label>
+          <input id="h-query-date" type="date" />
+          <button id="h-query-btn" class="btn-ghost">查询</button>
+          <div id="h-query-result" class="hint"></div>
+        </div>
+        <div class="fw-banner" id="fw-history-banner"></div>
+        <div class="hw-list" id="fw-history-table"></div>
+        <div id="history-list" class="history-list hidden"></div>
         <div id="history-empty" class="empty hidden">暂无记录</div>
+        <div class="section-title">月度统计 · 按账号与计件类型</div>
+        <div class="card"><div id="fw-monthly-table" class="pw-table"></div></div>
       </section>
 
       <!-- ---------- 收入记录（P1-1，独立命名空间） ---------- -->
@@ -190,7 +189,7 @@
         <div class="section-title">收入记录</div>
         <div id="income-list" class="history-list"></div>
         <div id="income-empty" class="empty hidden">还没有收入记录</div>
-        <button id="income-add" class="btn-primary">添加收入</button>
+        <button id="income-add" class="ro-write btn-primary">添加收入</button>
       </section>
 
       <!-- ---------- 工资 ---------- -->
@@ -211,6 +210,63 @@
         <div id="salary-empty" class="empty">选择日期后计算工资</div>
       </section>
 
+      <!-- ---------- 账号计件（旧账兼容视图，非最终口径） ----------
+           最终 11 项已整合进「今日」录入与「历史」主表，本页仅保留旧五项计件的
+           兼容查看/编辑入口，避免既有数据丢失；金额以「历史」主表与月度统计为准。
+           数据层：account_piecework_daily / account_price_history（独立新表，不碰 daily_records）。 -->
+      <section id="piecework-view" class="view">
+        <div class="fw-banner">
+          本页为<b>旧账兼容视图</b>。最终工资规则（11 项 / 六项内容计件）已整合进「今日」录入与「历史」主表，
+          日工资总额与月度统计请以那两处为准；此处仅供查看与补录既有五项计件原始数据。
+        </div>
+        <div class="pw-head">
+          <div class="seg" id="pw-seg">
+            <div class="seg-item active" data-mode="entry">录入</div>
+            <div class="seg-item" data-mode="stats">统计</div>
+          </div>
+          <button id="pw-settings-btn" class="ro-write pw-gear" aria-label="计价设置">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+          <span id="pw-sync-status" class="sync-status readonly-ok" title="只读查看端状态">只读 · 无待上传</span>
+        </div>
+
+        <!-- 录入子视图 -->
+        <div id="pw-entry" class="pw-sub">
+          <div class="card pw-date-card">
+            <label class="pw-date-label">业务日期</label>
+            <input id="pw-date" type="date" />
+          </div>
+          <div id="pw-eff-banner" class="banner warn hidden"></div>
+          <div id="pw-accounts"></div>
+          <div class="card pw-totals" id="pw-totals"></div>
+          <button id="pw-save" class="ro-write btn-primary">保存当日五项计件（旧账兼容）</button>
+          <div id="pw-status" class="hint"></div>
+        </div>
+
+        <!-- 统计子视图 -->
+        <div id="pw-stats" class="pw-sub hidden">
+          <div class="seg" id="pw-stat-seg">
+            <div class="seg-item active" data-smode="daily">每日</div>
+            <div class="seg-item" data-smode="monthly">月度</div>
+          </div>
+          <div id="pw-stat-daily" class="pw-stat-body">
+            <div class="card pw-date-card">
+              <label class="pw-date-label">业务日期</label>
+              <input id="pw-stat-date" type="date" />
+            </div>
+            <div id="pw-daily-table" class="pw-table"></div>
+          </div>
+          <div id="pw-stat-monthly" class="pw-stat-body hidden">
+            <div class="pw-month-nav">
+              <button id="pw-month-prev" class="cal-nav" aria-label="上一月">‹</button>
+              <span id="pw-month-label" class="cal-title"></span>
+              <button id="pw-month-next" class="cal-nav" aria-label="下一月">›</button>
+            </div>
+            <div id="pw-monthly-table" class="pw-table"></div>
+          </div>
+        </div>
+      </section>
+
       <!-- ---------- 设置（由右上角账户菜单 →「设置」进入） ----------
            S2c 第二阶段：7 项价格参数可编辑（单价组 ±1 / 工资组 ±100）+ 二次确认。
            复用既有 .view / .card / .section-title / .btn-primary / .modal 体系，不引入新架构。
@@ -225,7 +281,7 @@
         </button>
         <div class="section-title">设置</div>
         <div class="section-title">单价与工资参数</div>
-        <div class="card ps-card" id="ps-card">
+        <div class="card ps-card ro-write" id="ps-card">
           <!-- 单价组（步进 ±1） -->
           <div class="ps-row" data-field="price">
             <span class="ps-label">出单单价<em class="ps-unit">元/单</em></span>
@@ -272,25 +328,41 @@
             <button type="button" class="ps-step" data-step="1" aria-label="增加未达标底薪">+</button>
           </div>
         </div>
-        <button id="settings-save" class="btn-primary">保存</button>
+        <button id="settings-save" class="ro-write btn-primary">保存</button>
         <div id="settings-status" class="hint"></div>
+        <div class="section-title">最终工资规则 · 六项内容计件价格</div>
+        <div class="card fw-price-card">
+          <div class="fw-price-head ro-write">
+            <label>规则生效日 F</label>
+            <input id="fw-effective-from" type="date" />
+            <button id="fw-price-save" class="btn-primary ro-write">保存六价</button>
+          </div>
+          <div id="fw-price-rows" class="ro-write"></div>
+          <div class="hint" id="fw-price-hint"></div>
+          <div class="hint">留空 = 未设置（不是 0 元）；填 0 = 明确设为 0 元。
+            六项各自独立、带生效日期与历史版本；F 之前的历史金额锁定不变。
+            抖音不记录退款；出单：小红书 (出单−退款) × <span id="fw-xhs-price">4</span> 元，抖音沿用系统现有单价。</div>
+        </div>
+      </section>
+
+      <!-- ---------- 同步状态（U4：只读）---------- -->
+      <section id="status-view" class="view">
+        <div class="ro-decl-banner">手机端只读查看端 · 不写入云端</div>
+        <div id="status-body"></div>
       </section>
 
     </main>
 
-    <!-- 底部导航 -->
+    <!-- U4：底部导航仅 3 个只读 tab（历史记录 / 工资管理 / 同步状态）-->
     <nav class="tabbar">
-      <button class="tab active" data-tab="today">
-        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span>今日</span>
-      </button>
-      <button class="tab" data-tab="history">
-        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span>历史</span>
-      </button>
-      <button class="tab" data-tab="income">
-        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><span>收入</span>
+      <button class="tab active" data-tab="history">
+        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span>历史记录</span>
       </button>
       <button class="tab" data-tab="salary">
-        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Z"/><path d="M16 12h.01"/></svg></span><span>工资</span>
+        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Z"/><path d="M16 12h.01"/></svg></span><span>工资管理</span>
+      </button>
+      <button class="tab" data-tab="status">
+        <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span><span>同步状态</span>
       </button>
     </nav>
   </div>
@@ -304,19 +376,21 @@
         <label>日期</label>
         <input id="e-date" type="date" disabled />
       </div>
-      <div class="grid2">
-        <div class="field"><label>小红书出单</label><input id="e-xhs" type="number" inputmode="numeric" min="0" /></div>
-        <div class="field"><label>抖音出单</label><input id="e-dy" type="number" inputmode="numeric" min="0" /></div>
-        <div class="field"><label>退款</label><input id="e-refund" type="number" inputmode="numeric" min="0" /></div>
-        <div class="field" id="row-e-assist"><label>助播 ¥</label><input id="e-assist" type="number" inputmode="numeric" min="0" /></div>
-        <div class="field"><label>图文</label><input id="e-note" type="number" inputmode="numeric" min="0" /></div>
-        <div class="field"><label>素材</label><input id="e-material" type="number" inputmode="numeric" min="0" /></div>
-        <div class="field"><label>视频</label><input id="e-video" type="number" inputmode="numeric" min="0" /></div>
+      <div class="fw-edit-rows" id="fw-edit-rows"></div>
+      <div id="fw-edit-compat" class="hidden" aria-hidden="true">
+        <input id="e-xhs" type="number" value="0" />
+        <input id="e-dy" type="number" value="0" />
+        <input id="e-refund" type="number" value="0" />
+        <input id="e-assist" type="number" value="0" />
+        <input id="e-note" type="number" value="0" />
+        <input id="e-material" type="number" value="0" />
+        <input id="e-video" type="number" value="0" />
+        <div id="row-e-assist"></div>
       </div>
       <div class="sheet-actions">
-        <button id="e-delete" class="btn-danger">删除</button>
+        <button id="e-delete" class="ro-write btn-danger">删除</button>
         <button id="e-cancel" class="btn-ghost">取消</button>
-        <button id="e-save" class="btn-primary">保存</button>
+        <button id="e-save" class="ro-write btn-primary">保存</button>
       </div>
       <div id="e-status" class="hint"></div>
     </div>
@@ -345,9 +419,22 @@
       </div>
       <div id="income-status" class="hint"></div>
       <div class="sheet-actions">
-        <button id="income-delete" class="btn-danger hidden">删除</button>
+        <button id="income-delete" class="ro-write btn-danger hidden">删除</button>
         <button id="income-cancel" class="btn-ghost">取消</button>
-        <button id="income-save" class="btn-primary">保存</button>
+        <button id="income-save" class="ro-write btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 账号计价设置弹层（计件模块：6 单价 + 生效日期 + 历史调价） -->
+  <div id="pw-price-sheet" class="sheet hidden">
+    <div class="sheet-backdrop" id="pw-price-backdrop"></div>
+    <div class="sheet-panel glass">
+      <div class="sheet-title">账号计价设置</div>
+      <div class="sheet-scroll" id="pw-price-body"></div>
+      <div class="sheet-actions">
+        <button id="pw-price-cancel" class="btn-ghost">取消</button>
+        <button id="pw-price-save" class="ro-write btn-primary">保存</button>
       </div>
     </div>
   </div>
@@ -362,7 +449,7 @@
       </div>
       <div class="modal-actions">
         <button id="revive-cancel" class="btn-ghost">取消</button>
-        <button id="revive-confirm" class="btn-primary">恢复并保存</button>
+        <button id="revive-confirm" class="ro-write btn-primary">恢复并保存</button>
       </div>
     </div>
   </div>
@@ -377,15 +464,22 @@
       <div class="modal-body" id="price-confirm-body"></div>
       <div class="modal-actions">
         <button id="price-confirm-cancel" class="btn-ghost">取消</button>
-        <button id="price-confirm-ok" class="btn-primary">确认保存</button>
+        <button id="price-confirm-ok" class="ro-write btn-primary">确认保存</button>
       </div>
     </div>
   </div>
 
+  <!-- U4：环境配置 + 只读保护必须在 app.js 之前加载 -->
+  <script src="./config.js"></script>
+  <script src="./readonly_guard.js"></script>
   <!-- Supabase JS SDK (UMD, 本地副本，支持离线首启) -->
   <script src="./vendor/supabase.js"></script>
   <!-- 离线本地数据层（原生 IndexedDB 封装，必须先于 app.js 加载） -->
   <script src="./localdb.js"></script>
+  <!-- 账号计件离线同步核心（独立于 daily_records 旧同步核心，先于 app.js 加载） -->
+  <script src="./piecework_sync.js"></script>
+  <script src="./final_wage.js"></script>
   <script src="app.js"></script>
+  <script src="./final_wage_ui.js"></script>
 </body>
 </html>

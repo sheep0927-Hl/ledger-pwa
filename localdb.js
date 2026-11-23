@@ -6,20 +6,27 @@
  *  - 仅个人使用：records 按 user_id 隔离（store 上建 user_id 索引）。
  *
  * 存储：
- *  - DB 名 ledger-offline，version 2
+ *  - DB 名 ledger-offline，version 3
  *  - store "records"：keyPath = date，保存当前用户记录镜像（含 user_id / 业务字段 / modifiedAt / *_modified_at / deleted_at）
  *  - store "meta"：keyPath = key，保存 lastSyncAt、会话缓存、当前用户等元信息
- *  - store "pending"：keyPath = id，离线待同步队列（outbox）
+ *  - store "pending"：keyPath = id，离线待同步队列（outbox，daily_records 用）
  *       字段：id / date / action('save'|'delete') / payload / createdAt
  *       - 不影响 records / meta；不删除任何现有数据；不改变读取逻辑。
  *       - 仅由 saveRecord / deleteRecord 在上传失败时写入、由网络恢复补推成功时删除。
+ *  - store "piecework"：keyPath = pw_key，账号计件【已提交镜像】（断网时也保留，刷新/重开可恢复展示）
+ *  - store "pending_pw"：keyPath = id，账号计件 / 计价【离线待同步队列】（outbox，独立于 daily_records）
+ *       - 复用与 pending 完全相同的「失败入队、联网补推、成功出队」语义，但物理隔离，
+ *         绝不混入 daily_records 的 pending，避免旧同步核心误处理新模块数据。
+ *       - 字段：id / kind('piecework'|'price') / date / account / action / payload / createdAt
  */
 var LocalDB = (function () {
   const DB_NAME = 'ledger-offline';
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
   const STORE_RECORDS = 'records';
   const STORE_META = 'meta';
   const STORE_PENDING = 'pending';
+  const STORE_PIECEWORK = 'piecework';
+  const STORE_PENDING_PW = 'pending_pw';
 
   let dbPromise = null;
 
@@ -45,8 +52,28 @@ var LocalDB = (function () {
           const ps = db.createObjectStore(STORE_PENDING, { keyPath: 'id' });
           ps.createIndex('date', 'date', { unique: false });
         }
+        // 账号计件：已提交镜像 + 离线待同步队列（升级到 v3 时创建，已有库自动补齐）
+        if (!db.objectStoreNames.contains(STORE_PIECEWORK)) {
+          const pw = db.createObjectStore(STORE_PIECEWORK, { keyPath: 'pw_key' });
+          pw.createIndex('user_id', 'user_id', { unique: false });
+          pw.createIndex('business_date', 'business_date', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_PENDING_PW)) {
+          const pp = db.createObjectStore(STORE_PENDING_PW, { keyPath: 'id' });
+          pp.createIndex('kind', 'kind', { unique: false });
+          pp.createIndex('date', 'date', { unique: false });
+        }
       };
-      req.onsuccess = () => resolve(req.result);
+      // 多标签页/旧页面仍占用数据库时：升级会被阻塞。必须给出明确提示，
+      // 不能静默挂起或清除数据库（upgradeneeded 只会新建 store，绝不删除旧数据）。
+      req.onblocked = () => reject(new Error(
+        '数据库升级被阻塞：检测到其他页面/标签页仍打开本应用。' +
+        '请关闭所有本应用标签页后重试，升级期间不会清除任何本地数据。'));
+      req.onsuccess = () => {
+        // 当其他上下文请求更高版本时，主动关闭本连接，避免反过来阻塞对方升级。
+        req.result.onversionchange = () => { try { req.result.close(); } catch (_) {} };
+        resolve(req.result);
+      };
       req.onerror = () => reject(req.error);
     });
     return dbPromise;
@@ -123,6 +150,17 @@ var LocalDB = (function () {
     return reqToPromise(s.put({ key, value }));
   }
 
+  /* ---------- U4：旧 outbox 隔离标记（持久化在 meta） ----------
+   * 隔离后 getAllPending / getAllPieceworkPending 仍可【只读返回数量】，
+   * 但任何补推路径都不重放（由 app.js 的 assertReadOnly 保证）；不删除旧 outbox 数据。 */
+  const OUTBOX_QUARANTINE_KEY = 'outbox_quarantined';
+  async function setOutboxQuarantined(flag) {
+    return setMeta(OUTBOX_QUARANTINE_KEY, !!flag);
+  }
+  async function isOutboxQuarantined() {
+    try { return (await getMeta(OUTBOX_QUARANTINE_KEY)) === true; } catch (_) { return false; }
+  }
+
   /* ---------- pending（离线待同步队列 / outbox） ---------- */
 
   /**
@@ -145,7 +183,7 @@ var LocalDB = (function () {
     return reqToPromise(s.put(rec));
   }
 
-  // 读取全部待同步项，按 createdAt 升序（补推顺序）。
+  // 读取全部待同步项，按 createdAt 升序。U4：隔离状态下仅用于【只读展示数量】，不参与任何重放。
   async function getAllPending() {
     const s = await store(STORE_PENDING, 'readonly');
     const all = await reqToPromise(s.getAll());
@@ -181,10 +219,98 @@ var LocalDB = (function () {
     });
   }
 
+  // 账号计件「已提交镜像」：keyPath = pw_key（business_date|account_code）
+  function pwKey(date, account) { return date + '|' + account; }
+
+  // 写入/更新一条计件镜像（离线也能保留；与 Supabase 行同构，额外带 pw_key）
+  async function putPiecework(row) {
+    const rec = Object.assign({}, row, { pw_key: pwKey(row.business_date, row.account_code) });
+    const s = await store(STORE_PIECEWORK, 'readwrite');
+    return reqToPromise(s.put(rec));
+  }
+
+  // 读取某用户全部计件镜像（按 business_date 倒序），仅当前用户。
+  async function getAllPiecework(userId) {
+    if (userId == null) return [];
+    const s = await store(STORE_PIECEWORK, 'readonly');
+    const all = await reqToPromise(s.getAll());
+    const rows = (all || []).filter((r) => r.user_id === userId);
+    rows.sort((a, b) => (b.business_date || '').localeCompare(a.business_date || ''));
+    return rows;
+  }
+
+  // 软删：写入 deleted_at tombstone（与 Supabase 软删语义一致），其余字段保留。
+  async function deletePiecework(date, account) {
+    const existing = await getPiecework(date, account);
+    const tomb = Object.assign({}, existing || {}, {
+      business_date: date, account_code: account,
+      deleted_at: new Date().toISOString()
+    });
+    if (existing && existing.user_id) tomb.user_id = existing.user_id;
+    return putPiecework(tomb);
+  }
+
+  async function getPiecework(date, account) {
+    const s = await store(STORE_PIECEWORK, 'readonly');
+    const row = await reqToPromise(s.get(pwKey(date, account)));
+    return row || null;
+  }
+
+  /* ---------- pending_pw（账号计件离线待同步队列 / outbox） ---------- */
+
+  // 写入一条待同步项。kind: 'piecework' | 'price'；action: 'save' | 'delete' | 'price'
+  // 不直接删除现有数据；离线录入后联网补推。
+  async function putPieceworkPending(entry) {
+    const rec = {
+      id: entry.id || genId(),
+      kind: entry.kind || 'piecework',
+      date: entry.date || null,
+      account: entry.account || null,
+      action: entry.action || 'save',
+      payload: entry.payload || null,
+      createdAt: (entry.createdAt || new Date().toISOString()) + '|' + (++_seq)
+    };
+    const s = await store(STORE_PENDING_PW, 'readwrite');
+    return reqToPromise(s.put(rec));
+  }
+
+  // 读取全部待同步项，按 createdAt 升序（补推顺序）。
+  async function getAllPieceworkPending() {
+    const s = await store(STORE_PENDING_PW, 'readonly');
+    const all = await reqToPromise(s.getAll());
+    return (all || []).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  }
+
+  // 按 id 删除一条待同步项（补推成功一条删一条）。
+  async function deletePieceworkPending(id) {
+    const s = await store(STORE_PENDING_PW, 'readwrite');
+    return reqToPromise(s.delete(id));
+  }
+
+  // 按 (date, account) 删除该键所有待同步项（某次在线操作成功，清除残留）。
+  async function deletePieceworkPendingByKey(date, account) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_PENDING_PW, 'readwrite');
+      const os = tx.objectStore(STORE_PENDING_PW);
+      const req = os.openCursor();
+      req.onsuccess = () => {
+        const cur = req.result;
+        if (!cur) { resolve(); return; }
+        const v = cur.value;
+        if (v.date === date && v.account === account) cur.delete();
+        cur.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
   return {
     openDB, putRecord, getAllRecords, getRecord, deleteRecord,
-    getMeta, setMeta,
-    putPending, getAllPending, deletePending, deletePendingByDate
+    getMeta, setMeta, setOutboxQuarantined, isOutboxQuarantined, OUTBOX_QUARANTINE_KEY,
+    putPending, getAllPending, deletePending, deletePendingByDate,
+    putPiecework, getAllPiecework, getPiecework, deletePiecework,
+    putPieceworkPending, getAllPieceworkPending, deletePieceworkPending, deletePieceworkPendingByKey
   };
 })();
 

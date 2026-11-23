@@ -1,7 +1,7 @@
 {
   "name": "总账 Ledger",
   "short_name": "总账",
-  "description": "手机端录入与查看每日记录，计算工资",
+  "description": "手机端只读查看每日记录、工资与同步状态",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

@@ -1,0 +1,73 @@
+# ============================================================================
+# Ledger PWA — 安全构建（构建期凭据注入，不发布）
+# ----------------------------------------------------------------------------
+# 放置位置：仓库 sheep0927-Hl/ledger-pwa 的 .github/workflows/build-pwa.yml
+# 触发方式：仅 workflow_dispatch（手动），不监听 push / schedule，避免自动发布。
+# 凭据来源：Repository Secrets —— SUPABASE_URL、SUPABASE_PUBLISHABLE_KEY。
+# 安全约束：
+#   - 只注入 publishable / anon 公钥；注入器 fail-closed 拒绝服务端秘密。
+#   - 凭据仅存在于本次 job 的环境变量，构建后随 runner 销毁；不写日志/源码/Git。
+#   - 本 workflow 只生成并上传构建产物 artifact，**不含任何 deploy / pages / push 步骤**。
+# ============================================================================
+name: Build PWA (secure config injection)
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: '本次构建说明（可选，仅记录用途，勿填任何密钥）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout（只读源码）
+        uses: actions/checkout@v4
+
+      - name: 校验 Secrets 存在性（只报存在与否，不打印值）
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "${SUPABASE_URL:-}" ]; then
+            echo "[FATAL] 缺少 Repository Secret: SUPABASE_URL"; exit 3
+          fi
+          if [ -z "${SUPABASE_PUBLISHABLE_KEY:-}" ]; then
+            echo "[FATAL] 缺少 Repository Secret: SUPABASE_PUBLISHABLE_KEY"; exit 3
+          fi
+          echo "[PASS] 两个 Secret 均已配置（值不输出）"
+
+      - name: 构建期注入（fail-closed）
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          chmod +x scripts/build_with_credentials.sh
+          ./scripts/build_with_credentials.sh . dist
+
+      - name: 产物安全扫描（无服务端秘密 / 无测试残留）
+        run: |
+          python3 scripts/scan_artifact.py dist
+
+      - name: 生成产物 SHA256 清单
+        run: |
+          cd dist
+          find . -type f -not -name '.DS_Store' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          echo "[PASS] SHA256SUMS.txt 已生成（$(wc -l < SHA256SUMS.txt) 条）"
+
+      - name: 上传构建产物（仅 artifact，不发布）
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-pwa-build
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+      # 明确：本 workflow 不含 pages deploy / git push / 外部网络写操作。
+      # 发布须另行单独授权并走受保护流程。

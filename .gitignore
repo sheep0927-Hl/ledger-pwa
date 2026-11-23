@@ -1,1 +1,23 @@
+# PWA 发布白名单：deploy_github_pages.sh 复制本目录全部内容，
+# 用本文件排除开发预览 / 测试产物，只发布正式应用壳 + 功能文件。
+#
+# 必须发布（勿排除）：
+#   index.html  app.js  localdb.js  piecework_sync.js  style.css
+#   service-worker.js  manifest.json  vendor/  icons/
+
+# 开发预览页（独立 demo，不参与发布）
+phase3a-check.html
+v3-preview.html
+v3a-swipe-preview.html
+v3c-preview.html
+v3c-plus-preview.html
+v3d-preview.html
+v3e-preview.html
+preview.html
+v3-preview-source.html
+
+# 本地验证脚本 / 测试数据
+Validation/
+
+# 系统 / 元数据
 .DS_Store
