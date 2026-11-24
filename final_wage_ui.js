@@ -32,6 +32,11 @@
   var KEY_FROM = 'final_wage_effective_from';
   var KEY_BASELINE = 'final_wage_legacy_baseline';
 
+  /* 独立版本标识：证明「本次价格簿合并修复版 UI」确实加载。
+   * 与 app.js 的 APP_BUILD_ID 解耦 —— 后者自 20261123 未变，无法证明 UI 修复版生效。
+   * 严禁在此写入任何密钥/URL/账号信息。 */
+  var FINAL_WAGE_UI_BUILD_ID = '20261124-price-merge-v1';
+
   var STATE = {
     book: [],
     from: FW.DEFAULT_EFFECTIVE_FROM,
@@ -108,6 +113,8 @@
     renderEntry();
     renderHistoryTable();
     renderPriceSettings();
+    // 通知诊断面板（仅 ?diag=1 有监听）：账户价到达后已重算，可刷新运行时快照。
+    try { window.dispatchEvent(new CustomEvent('fw-diag-refresh')); } catch (_) {}
   }
 
   /** 启用瞬间固化历史取价基线（只做一次），保证此后改价不重算旧月。
@@ -718,6 +725,52 @@
     if (hint) { hint.innerHTML = '<span class="fw-unset">⚠ ' + text + '</span>'; hint.dataset.blocked = '1'; }
   }
 
+  /* ---------- 独立运行时诊断（仅 ?diag=1 由 app.js 读取；严禁输出密钥） ----------
+   * 目的：证明「价格簿合并修复版 UI」实际加载并真正执行。
+   * 全部取自与历史卡片同源的 mergedBook()/priceAt()/dailyOf()，不另造计算路径。
+   * 只返回数量、单价、金额等标量，不含任何 URL / key / 账号信息。 */
+  function diagSnapshot() {
+    var derived = derivedAccountEntries();
+    var merged = mergedBook();
+    var baseCount = (STATE.book && STATE.book.length) || 0;
+    var mergedCount = (merged && merged.length) || 0;
+    var acctCount = 0;
+    try { if (typeof accountPrices !== 'undefined' && accountPrices) acctCount = accountPrices.length; } catch (_) {}
+
+    // 三项单价：与历史卡片 2026-11-23 同口径，取合并簿当日生效价
+    var probeDate = '2026-11-23';
+    var pick = function (key) {
+      var p = null;
+      try { p = FW.priceAt(key, probeDate, merged); } catch (_) {}
+      return (p === null || p === undefined) ? null : p;
+    };
+    var prices = {
+      beeVideo: pick('xiaohongshu_beebag|video'),
+      beeNote: pick('xiaohongshu_beebag|note'),
+      dyPublish: pick('douyin_sam|publish')
+    };
+
+    // 三天工资：与 renderHistoryTable 卡头 ¥total 完全同源（dailyOf(date).total）
+    var wages = {};
+    ['2026-11-21', '2026-11-22', '2026-11-23'].forEach(function (d) {
+      var t = null;
+      try { var r = dailyOf(d); if (r) t = r.total; } catch (_) {}
+      wages[d] = t;
+    });
+
+    return {
+      buildId: FINAL_WAGE_UI_BUILD_ID,
+      accountPricesCount: acctCount,
+      derivedEntriesCount: derived.length,
+      baseBookCount: baseCount,
+      mergedBookCount: mergedCount,
+      prices: prices,
+      wages: wages,
+      accountPricesMissing: !!STATE.accountPricesMissing,
+      probedDate: probeDate
+    };
+  }
+
   function installHooks() {
     // 价格簿合并联动（授权要求 7/8）：包装既有 loadAccountPrices —— app.js 登录流程
     // （onLoggedIn → await loadAccountPrices）必然晚于本文件 boot 安装包装，
@@ -760,6 +813,7 @@
     if (d) d.addEventListener('change', function () { renderEntry(); });
     // 暴露给测试 / 截图脚本
     window.FinalWageUI = {
+      BUILD_ID: FINAL_WAGE_UI_BUILD_ID, diagSnapshot: diagSnapshot,
       STATE: STATE, loadState: loadState, ensureBaseline: ensureBaseline,
       priceAt: priceAt,       readFields: readFields, dailyOf: dailyOf, entryDaily: entryDaily,
       collectVals: collectVals, checkBlocked: checkBlocked,
@@ -777,6 +831,9 @@
   }
 
   function boot() {
+    // 版本探针：脚本一执行即挂载，与是否登录无关。
+    // app.js 诊断面板据此判断「本次价格簿合并修复版 UI 是否真正加载」。
+    try { window.__FW_DIAG__ = { BUILD_ID: FINAL_WAGE_UI_BUILD_ID, diagSnapshot: diagSnapshot }; } catch (_) {}
     var params = (typeof location !== 'undefined' && location.search) || '';
     STATE.mock = /fwdemo=1/.test(params);
     loadState();

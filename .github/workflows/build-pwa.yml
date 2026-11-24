@@ -104,14 +104,14 @@ jobs:
           cat > "$ANCHORS" << 'EOF'
           c89f32c3bddcdd76d802b9318d7d606804ec35e56082ef9df14ec07c281d4e69  index.html
           6762f13c40a5dfbd4594911ead7965ed71ac469a07d1d23e3a42153f890a3f75  style.css
-          d0582b7bfe7f628e2153f16ed1f544fea0ad0e559db5cdba8292b9d9f852af8e  service-worker.js
-          b5c2509eae89806d0ea9ba117fe3cf9ff524f0356bf9eeeedf04eda624e75094  app.js
+          f1414e46d6cf4fbfa21526609ccfcfc085d713e9bc40328aa62c42ec281c43b9  service-worker.js
+          b13e230cbc0d85381632fc97472c9feb0b3eabe846089308c3a37459fb1560f0  app.js
           e6fa8a68c9e031546858259417021d93d6430c051fcb4f65515666719be2e3d6  localdb.js
           e6c21e05fab08d60a7622b94e58b7ec92c3181be59cf22041febc55a985a90a9  manifest.json
           c7e3094a5512e2dc2c6459d6da334ba9d20b770c1d24891d7704987c588165b1  readonly_guard.js
           ee4a86de312eb9ce7338a1ce18b77251bdff881e62fc1da0c49ffa7464f15bda  piecework_sync.js
           7a80b0c06424147b41191034f2149879bbcba614abd00127568d95316f89d5b1  final_wage.js
-          861f4b9bba2c9b92fedbc470ca47c97465e91aab0f711998ba0db5905e3a6fda  final_wage_ui.js
+          9d30a412e714a955efd9dcf63f1c4f2327e1a98855e690dd654313e8decb3da9  final_wage_ui.js
           f4c6d0e5290e4a58471afcb0a62a10848c31157186ad3f81cb2bd0cd22c1494a  config.js
           61010a711aa585660cc5132babd6da57fd89a973b845412c8916f8573a455c2b  vendor/supabase.js
           2cf8177f34f3ba21d716036c40d1306de5db50ed79b0a507c683d116c9e4e443  icons/icon-180.png

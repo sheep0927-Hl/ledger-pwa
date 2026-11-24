@@ -20,7 +20,7 @@ const LEDGER_CFG = window.LEDGER_ENV_CONFIG || null;
  * window.supabase 正常，OFFLINE_READONLY 也恒为 true → 状态胶囊恒显
  * 「只读 · 未配置环境」。语义拆分：OFFLINE_READONLY 只表示「无法连接云端」；
  * 「只读保护」（拦截写路径）由 ReadOnlyGuard 独立承担，不受此判定影响。 */
-const APP_BUILD_ID = '20261123-readonly-fix-diag1';
+const APP_BUILD_ID = '20261125-swv3-wage-diag2';
 const LEDGER_ENV = window.LEDGER_ENV ||
   (LEDGER_CFG && LEDGER_CFG.ACTIVE_ENV) || 'dev';
 const LEDGER_PROFILE = (LEDGER_CFG && LEDGER_CFG.profiles && LEDGER_CFG.profiles[LEDGER_ENV]) || {};
@@ -2999,13 +2999,16 @@ window.addEventListener('DOMContentLoaded', async () => {
  * 正常访问（无 diag=1）完全不渲染任何东西，零行为差异。 */
 (async function renderDiagPanel() {
   'use strict';
-  try {
-    const params = new URLSearchParams(location.search);
-    if (params.get('diag') !== '1') return;   // 只有显式 diag=1 才显示，其余一律不渲染
+  const params = new URLSearchParams(location.search);
+  if (params.get('diag') !== '1') return;   // 只有显式 diag=1 才显示，其余一律不渲染
 
+  // 可重绘：账户价异步加载完成后由 UI 层派发 fw-diag-refresh，重新采集运行时快照。
+  async function paint() {
+  try {
     const line = (k, v) => '<div style="margin:2px 0;"><b style="color:#333;">' + k +
       '</b>：<span style="color:#111;">' + String(v) + '</span></div>';
     const yesNo = (b) => (b ? '✅ 是' : '❌ 否');
+    const numOr = (v, d) => (v === null || v === undefined ? (d || '—') : String(v));
 
     // SW 版本：直接抓取 service-worker.js 源码里的 CACHE 常量（与实际运行一致）
     let swVersion = '读取失败';
@@ -3020,6 +3023,18 @@ window.addEventListener('DOMContentLoaded', async () => {
       const m = txt.match(/const\s+CACHE\s*=\s*'([^']+)'/);
       swVersion = m ? m[1] : '未找到 CACHE 常量';
     } catch (_) { swVersion = 'fetch 异常'; }
+
+    // 独立 UI 版本 + 运行时快照（证明价格簿合并修复版确实加载并执行）。
+    // __FW_DIAG__ 由 final_wage_ui.js 脚本执行即挂载；若为旧版 UI 则整个对象缺失。
+    let fwDiag = null;
+    try {
+      const d = (window.__FW_DIAG__ && typeof window.__FW_DIAG__.diagSnapshot === 'function')
+        ? window.__FW_DIAG__.diagSnapshot()
+        : null;
+      fwDiag = d;
+    } catch (_) { fwDiag = null; }
+    const fwBuild = (fwDiag && fwDiag.buildId) ||
+      (window.FinalWageUI && window.FinalWageUI.BUILD_ID) || '（未加载：旧版 UI 或无 window.__FW_DIAG__）';
 
     // 条件逐项拆解（与 OFFLINE_READONLY 判定一一对应）
     const condNoCfg = !LEDGER_CFG;
@@ -3049,6 +3064,19 @@ window.addEventListener('DOMContentLoaded', async () => {
         'font:14px/1.5 -apple-system,Menlo,monospace;color:#111;-webkit-overflow-scrolling:touch;">',
       '<div style="font-weight:700;font-size:16px;margin-bottom:8px;">🔍 运行时诊断（?diag=1）</div>',
       line('APP_BUILD_ID', APP_BUILD_ID),
+      line('FINAL_WAGE_UI_BUILD_ID', fwBuild),
+      line('UI 价格簿合并版已加载', yesNo(fwDiag && fwDiag.buildId === '20261124-price-merge-v1')),
+      line('accountPrices 加载数量', fwDiag ? numOr(fwDiag.accountPricesCount) : '—（UI 未就绪/未登录）'),
+      line('账户价派生条目数', fwDiag ? numOr(fwDiag.derivedEntriesCount) : '—'),
+      line('价格簿条目（合并前→后）', fwDiag ? (numOr(fwDiag.baseBookCount) + ' → ' + numOr(fwDiag.mergedBookCount)) : '—'),
+      line('三项选中单价（' + (fwDiag ? fwDiag.probedDate : '11-23') + '）', fwDiag
+        ? ('BeeBag视频 ' + numOr(fwDiag.prices.beeVideo) + ' / BeeBag笔记 ' +
+           numOr(fwDiag.prices.beeNote) + ' / 抖音发布 ' + numOr(fwDiag.prices.dyPublish))
+        : '—'),
+      line('11/21 实际工资', fwDiag ? ('¥' + numOr(fwDiag.wages['2026-11-21'])) : '—'),
+      line('11/22 实际工资', fwDiag ? ('¥' + numOr(fwDiag.wages['2026-11-22'])) : '—'),
+      line('11/23 实际工资', fwDiag ? ('¥' + numOr(fwDiag.wages['2026-11-23'])) : '—'),
+      line('账户价缺失告警', fwDiag ? yesNo(fwDiag.accountPricesMissing) : '—'),
       line('config.js 是否加载', yesNo(!!LEDGER_CFG)),
       line('ACTIVE_ENV', LEDGER_ENV || '(空)'),
       line('生效 profile label', (LEDGER_PROFILE && LEDGER_PROFILE.label) || '(空)'),
@@ -3068,6 +3096,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         '去掉地址栏 ?diag=1 即恢复正常页面。</div>',
       '</div>'
     ].join('');
+    var old = document.getElementById('diag-panel');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
     document.body.insertAdjacentHTML('afterbegin', html);
   } catch (_) { /* 诊断面板绝不影响主流程 */ }
+  }  // end paint()
+
+  await paint();
+  // UI 层账户价加载完成后派发；同时兜底延时重绘，覆盖 boot/登录晚于诊断面板的时序。
+  try { window.addEventListener('fw-diag-refresh', function () { paint(); }); } catch (_) {}
+  setTimeout(function () { paint(); }, 1200);
+  setTimeout(function () { paint(); }, 3500);
 })();
