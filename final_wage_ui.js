@@ -37,7 +37,8 @@
     from: FW.DEFAULT_EFFECTIVE_FROM,
     baseline: null,
     mock: false,
-    editDate: null
+    editDate: null,
+    accountPricesMissing: false
   };
 
   /* ---------- 本地配置（IndexedDB / localStorage 均可，绝不写云端） ---------- */
@@ -60,6 +61,55 @@
     STATE.baseline = readLocal(KEY_BASELINE, null);
   }
 
+  /* ---------- 账户价格历史合并（对齐 Mac FinalWageStoreAdapter.mergedFinalWageEntries） ----------
+   * Mac 语义（Sources/FinalWageStoreAdapter.swift:90）：
+   *   derived = accountPrices.filter { !$0.isDeleted }.map {
+   *     key: accountCode + "|" + contentType, unitPrice, effectiveFrom }
+   *   merged = finalWagePrices + derived   —— 直接拼接，不去重；
+   *   取价由 priceAt 按 (effective_from, created_at) 升序取 <= date 的最后一条。
+   * PWA 同构：非删 account_price_history 行 → FW 条目追加在播种簿之后；
+   *   FW.priceAt 稳定排序下同 effective_from 时后 appended 者胜出（等价 Mac 语义：
+   *   云端行 created_at 晚于播种簿出厂）。绝不硬编码单价，绝不回落迁移默认价。 */
+  function derivedAccountEntries() {
+    var src = null;
+    try { if (typeof accountPrices !== 'undefined' && accountPrices) src = accountPrices; } catch (_) {}
+    if (!src || !src.length) return [];
+    return src.filter(function (p) { return p && !p.deleted_at; }).map(function (p) {
+      return {
+        key: p.account_code + '|' + p.content_type,
+        unit_price: FW.num(p.unit_price),
+        effective_from: p.effective_from,
+        created_at: p.created_at || ''
+      };
+    });
+  }
+  function mergedBook() {
+    var derived = derivedAccountEntries();
+    return derived.length ? STATE.book.concat(derived) : STATE.book;
+  }
+
+  /** 账户价格历史加载结果提示（授权要求 8：加载失败/为空不得静默当作正确工资）。
+   *  已登录 + 云端行数为空 + 非 Mock → 历史页横幅显示警告，提示单价可能回落默认值。 */
+  function refreshAccountPricesHealth() {
+    STATE.accountPricesMissing = false;
+    if (STATE.mock) return;
+    var logged = false;
+    try { logged = (typeof currentUser !== 'undefined' && currentUser && !!currentUser.id); } catch (_) {}
+    if (!logged) return;
+    var src = null;
+    try { if (typeof accountPrices !== 'undefined' && accountPrices) src = accountPrices; } catch (_) {}
+    if (!src || !src.length) STATE.accountPricesMissing = true;
+  }
+
+  /** loadAccountPrices 完成后（成功/失败均触发）刷新全部工资视图，
+   *  避免「先用默认价渲染、账户价到达后不更新」（授权要求 7）。 */
+  function applyAccountPricesRefresh() {
+    refreshAccountPricesHealth();
+    renderEntry();
+    renderHistoryTable();
+    renderPriceSettings();
+  }
+
   /** 启用瞬间固化历史取价基线（只做一次），保证此后改价不重算旧月。
    *  关键：必须采集【启用瞬间旧链路真实会用的取价】，而不是出厂默认。
    *  有 PRICE_VERSIONS 时 configAt 返回最早版本；无版本时返回当前 CONFIG。
@@ -79,7 +129,7 @@
     writeLocal(KEY_BASELINE, STATE.baseline);
   }
 
-  function priceAt(key, date) { return FW.priceAt(key, date, STATE.book); }
+  function priceAt(key, date) { return FW.priceAt(key, date, mergedBook()); }
 
   /* ---------- 11 项数据读取 / 写入 ---------- */
 
@@ -121,7 +171,7 @@
     return FW.daily({
       date: date, counts: counts,
       xhs: rec.xhs, refund: rec.refund, dy: rec.dy, extra: rec.assist,
-      effectiveFrom: STATE.from, entries: STATE.book,
+      effectiveFrom: STATE.from, entries: mergedBook(),
       dyOrderUnitPrice: (typeof configAt === 'function' ? configAt(date).price : 4),
       legacyTotal: FW.legacyTotal(rec, {
         versions: versions, baseline: STATE.baseline,
@@ -152,7 +202,7 @@
     if (!FW.isActive(date, STATE.from)) {
       return dailyOf(date) || FW.daily({
         date: date, counts: {}, xhs: 0, refund: 0, dy: 0, extra: 0,
-        effectiveFrom: STATE.from, entries: STATE.book,
+        effectiveFrom: STATE.from, entries: mergedBook(),
         dyOrderUnitPrice: dyUnitPrice(date), legacyTotal: 0
       });
     }
@@ -163,7 +213,7 @@
       date: date, counts: counts,
       xhs: FW.num(vals.xhs_order), refund: FW.num(vals.xhs_refund),
       dy: FW.num(vals.dy_order), extra: FW.num(vals.extra_income),
-      effectiveFrom: STATE.from, entries: STATE.book,
+      effectiveFrom: STATE.from, entries: mergedBook(),
       dyOrderUnitPrice: dyUnitPrice(date), legacyTotal: 0
     });
   }
@@ -386,7 +436,10 @@
     var banner = $('fw-history-banner');
     if (banner) {
       banner.innerHTML = '<b>历史记录 · 每日完整卡片</b> ｜ 11 项默认全部显示' +
-        ' ｜ 规则生效日 F = ' + STATE.from + '，F 之前按原始旧账展示（金额锁定）';
+        ' ｜ 规则生效日 F = ' + STATE.from + '，F 之前按原始旧账展示（金额锁定）' +
+        (STATE.accountPricesMissing
+          ? '<br /><span class="fw-unset">⚠ 账户价格历史未加载（云端读取失败或为空）：BeeBag 视频/笔记、抖音发布等单价可能回落默认价，工资仅供参考，不代表最终口径</span>'
+          : '');
     }
     if (!rs.length) { box.innerHTML = '<div class="empty">暂无记录</div>'; return; }
     var gridFields = FW.FIELDS.filter(function (f) { return !f.computed; }); // 前 10 项；第 11 项在卡头
@@ -510,7 +563,7 @@
   /* ---------- 保存 11 项（写既有数据通道） ---------- */
   /** 同步预检：数量 > 0 但单价未设置 → 阻止保存。供 document capture 监听器调用。 */
   function checkBlocked(vals, date) {
-    return FW.blockedKeys(vals, date, STATE.book);
+    return FW.blockedKeys(vals, date, mergedBook());
   }
 
   /** 今日页与编辑弹层共用：把 5 项账号计件写入既有 accountPiecework 通道。 */
@@ -666,6 +719,25 @@
   }
 
   function installHooks() {
+    // 价格簿合并联动（授权要求 7/8）：包装既有 loadAccountPrices —— app.js 登录流程
+    // （onLoggedIn → await loadAccountPrices）必然晚于本文件 boot 安装包装，
+    // 因此每次账户价格历史拉取完成（成功或失败）都会刷新全部工资视图；
+    // 失败/为空时经 refreshAccountPricesHealth 置警告标记，绝不静默当正确。
+    try {
+      if (typeof window.loadAccountPrices === 'function' && !window.__fw_ap_wrap__) {
+        var origLoadAccountPrices = window.loadAccountPrices;
+        window.__fw_ap_wrap__ = true;
+        window.loadAccountPrices = function () {
+          var r = origLoadAccountPrices.apply(this, arguments);
+          try {
+            Promise.resolve(r).then(function () { applyAccountPricesRefresh(); })
+              .catch(function () { applyAccountPricesRefresh(); });
+          } catch (_) { applyAccountPricesRefresh(); }
+          return r;
+        };
+      }
+    } catch (_) {}
+
     // 关键：app.js 在 DOMContentLoaded 里先于本文件注册 #t-save / #e-save 的 target 监听器。
     // 同一元素上 capture 标志不决定执行顺序（AT_TARGET 按注册顺序），所以必须在
     // document 的捕获阶段拦截，才能真正做到「单价未设置时阻止整个保存，避免半套数据」。
@@ -689,8 +761,11 @@
     // 暴露给测试 / 截图脚本
     window.FinalWageUI = {
       STATE: STATE, loadState: loadState, ensureBaseline: ensureBaseline,
-      priceAt: priceAt, readFields: readFields, dailyOf: dailyOf, entryDaily: entryDaily,
+      priceAt: priceAt,       readFields: readFields, dailyOf: dailyOf, entryDaily: entryDaily,
       collectVals: collectVals, checkBlocked: checkBlocked,
+      mergedBook: mergedBook, derivedAccountEntries: derivedAccountEntries,
+      applyAccountPricesRefresh: applyAccountPricesRefresh,
+      refreshAccountPricesHealth: refreshAccountPricesHealth,
       renderEntry: renderEntry, renderEntryTotal: renderEntryTotal,
       renderHistoryTable: renderHistoryTable,
       renderMonthlyTable: renderMonthlyTable, renderPriceSettings: renderPriceSettings,
@@ -737,6 +812,14 @@
         renderEntry(); renderHistoryTable(); renderPriceSettings();
       }
     }
+    // 兜底（授权要求 7）：若 loadAccountPrices 的调用发生在本文件包装安装之前
+    // （极端时序竞态），1.5s 后检查一次账户价是否已到达并补一次刷新。
+    // 渲染幂等且仅在派生条目非空时触发，生产正常路径下是无害空操作。
+    setTimeout(function () {
+      try {
+        if (derivedAccountEntries().length) applyAccountPricesRefresh();
+      } catch (_) {}
+    }, 1500);
   }
 
   if (typeof document !== 'undefined') {

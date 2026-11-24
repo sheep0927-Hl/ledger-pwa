@@ -111,7 +111,7 @@ jobs:
           c7e3094a5512e2dc2c6459d6da334ba9d20b770c1d24891d7704987c588165b1  readonly_guard.js
           ee4a86de312eb9ce7338a1ce18b77251bdff881e62fc1da0c49ffa7464f15bda  piecework_sync.js
           7a80b0c06424147b41191034f2149879bbcba614abd00127568d95316f89d5b1  final_wage.js
-          45d5053d5ea66f1d9f4b51bde628f7123e779c0ea0d44e82490e738740ff7cd2  final_wage_ui.js
+          861f4b9bba2c9b92fedbc470ca47c97465e91aab0f711998ba0db5905e3a6fda  final_wage_ui.js
           f4c6d0e5290e4a58471afcb0a62a10848c31157186ad3f81cb2bd0cd22c1494a  config.js
           61010a711aa585660cc5132babd6da57fd89a973b845412c8916f8573a455c2b  vendor/supabase.js
           2cf8177f34f3ba21d716036c40d1306de5db50ed79b0a507c683d116c9e4e443  icons/icon-180.png
